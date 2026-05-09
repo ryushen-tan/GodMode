@@ -59,6 +59,42 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true, region: REGION, model: MODEL_ID });
 });
 
+// Available base GLBs from example_game/sprites/. The renderer's dropdown
+// is populated from this list so the user can pick which model to merge
+// the AI 2D output into.
+const SPRITES_DIR = path.join(
+  __dirname,
+  '..',
+  'example_game',
+  'godot-FirstPersonStarter-main',
+  'sprites',
+);
+
+app.get('/api/sprites', (_req, res) => {
+  try {
+    const fs = require('fs');
+    const files = fs
+      .readdirSync(SPRITES_DIR)
+      .filter((f) => f.toLowerCase().endsWith('.glb'))
+      .sort();
+    res.json({ sprites: files });
+  } catch (err) {
+    res.status(500).json({ error: err.message, sprites: [] });
+  }
+});
+
+// Serve the original sprite GLBs (so the renderer can preview them)
+app.get('/sprites/:name', (req, res) => {
+  const fs = require('fs');
+  const name = req.params.name;
+  if (!name.toLowerCase().endsWith('.glb')) return res.status(400).end();
+  const full = path.join(SPRITES_DIR, name);
+  if (!full.startsWith(SPRITES_DIR)) return res.status(400).end();
+  if (!fs.existsSync(full)) return res.status(404).end();
+  res.setHeader('Content-Type', 'model/gltf-binary');
+  fs.createReadStream(full).pipe(res);
+});
+
 // Diagnostic: list image-output foundation models and inference profiles
 app.get('/api/bedrock-models', async (_req, res) => {
   try {
@@ -264,7 +300,7 @@ function meshyToJobStatus(meshyStatus) {
 }
 
 app.post('/api/3d/start', async (req, res) => {
-  const { imageUrl, prompt } = req.body || {};
+  const { imageUrl, prompt, baseSprite } = req.body || {};
   if (!imageUrl) return res.status(400).json({ error: 'imageUrl required' });
   if (!MESHY_API_KEY) {
     return res.status(500).json({ error: 'MESHY_API_KEY missing in .env' });
@@ -310,6 +346,8 @@ app.post('/api/3d/start', async (req, res) => {
       lastModelUrl: null,
       lastError: null,
       prompt: prompt || null,
+      // Recorded for Pass 2 (gltf-transform mesh merge into this sprite).
+      baseSprite: baseSprite || null,
     });
     console.log(`[3d/start] jobId=${jobId} meshyTask=${meshyTaskId}`);
     res.json({ jobId, status: 'queued' });

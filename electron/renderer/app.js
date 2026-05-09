@@ -327,7 +327,7 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// ---- Generate 3D pipeline (canvas → 2D image → mock 3D) ----
+// ---- Generate 3D pipeline (canvas → 2D image → Meshy 3D) ----
 const generate3dBtn = document.getElementById('generate-3d-btn');
 const resultBox = document.getElementById('generate-result');
 const resultPreview = document.getElementById('result-preview');
@@ -335,6 +335,24 @@ const resultProgressFill = document.getElementById('result-progress-fill');
 const resultStatus = document.getElementById('result-status');
 const resultLog = document.getElementById('result-log');
 const resultModel = document.getElementById('result-model');
+const spriteSelect = document.getElementById('sprite-select');
+
+// Populate the base-model dropdown from backend's /api/sprites
+(async () => {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/sprites`);
+    if (!res.ok) return;
+    const { sprites } = await res.json();
+    for (const name of sprites || []) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name.replace(/\.glb$/i, '');
+      spriteSelect.appendChild(opt);
+    }
+  } catch {
+    // backend not running yet; user can still draw without a base model
+  }
+})();
 
 function logLine(text) {
   const line = document.createElement('div');
@@ -716,10 +734,16 @@ generate3dBtn.addEventListener('click', async () => {
     }
 
     const provider = new BackendThreeDProvider({ baseUrl: BACKEND_URL });
+    const baseSprite = spriteSelect.value || null;
+    if (baseSprite) {
+      logLine(`will merge into base sprite: ${baseSprite}`);
+    }
     const started = await provider.startGeneration({
       imageUrl: imageUrlFor3D,
       prompt,
       mode: 'object',
+      // Forwarded to backend; merging happens in Pass 2.
+      baseSprite,
     });
     logLine(`3D job started: ${started.jobId} (Meshy can take 1–3 min)`);
 
