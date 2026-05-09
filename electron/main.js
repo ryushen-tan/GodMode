@@ -128,13 +128,13 @@ function findRunningGodotInfo() {
   }
 }
 
-function restartGodot() {
+function restartGodot(delayMs = 500) {
   // If we launched Godot ourselves
   if (godotProcess) {
     console.log('[GodMode] Restarting Godot (managed process)...');
     godotProcess.kill();
     godotProcess = null;
-    setTimeout(launchGodot, 500);
+    setTimeout(launchGodot, delayMs);
     return;
   }
 
@@ -149,7 +149,7 @@ function restartGodot() {
       setTimeout(() => {
         console.log(`[GodMode] Relaunching Godot from: ${info.binaryPath}`);
         exec(`"${info.binaryPath}" --path "${GAME_PROJECT_PATH}" &`);
-      }, 500);
+      }, delayMs);
     } catch (err) {
       console.error('[GodMode] Failed to restart external Godot:', err.message);
     }

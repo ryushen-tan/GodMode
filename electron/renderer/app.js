@@ -1017,6 +1017,14 @@ generate3dBtn.addEventListener('click', async () => {
       resultModel.innerHTML =
         `<div class="result-label">3D Model (${label}, ${json.elapsedMs}ms)</div>` +
         `<a href="${json.modelUrl}" target="_blank" rel="noreferrer" download>Download .glb</a>`;
+
+      // Auto-fill the prompt with the saved sprite path
+      const glbFilename = json.modelUrl.split('/').pop().replace(/\.glb$/i, '.glb');
+      if (glbFilename && promptInput) {
+        const spritePath = `res://sprites/${glbFilename}`;
+        promptInput.value = `Add ${spritePath} to the scene at position (0, 2, 0)`;
+        logLine(`✓ Auto-filled prompt with: ${spritePath}`);
+      }
     } else {
       // Meshy: queue + poll
       resultStatus.textContent = 'starting 3D (Meshy)…';
@@ -1059,11 +1067,28 @@ generate3dBtn.addEventListener('click', async () => {
       resultModel.innerHTML =
         `<div class="result-label">3D Model (Meshy)</div>` +
         `<a href="${result.modelUrl}" target="_blank" rel="noreferrer" download>Download .glb</a>`;
+
+      // Auto-fill the prompt with the saved sprite path
+      const glbFilename = result.modelUrl.split('/').pop().replace(/\.glb$/i, '.glb');
+      if (glbFilename && promptInput) {
+        const spritePath = `res://sprites/${glbFilename}`;
+        promptInput.value = `Add ${spritePath} to the scene at position (0, 2, 0)`;
+        logLine(`✓ Auto-filled prompt with: ${spritePath}`);
+      }
     }
   } catch (err) {
     stopSyntheticProgress();
     resultStatus.textContent = 'failed';
-    logLine(`❌ ${err.message || err}`);
+    const errMsg = err.message || String(err);
+    logLine(`❌ ${errMsg}`);
+    
+    // Provide helpful suggestions based on error type
+    if (errMsg.includes('SSL') || errMsg.includes('502')) {
+      logLine('💡 Tip: SSL errors are usually transient. Try again or switch to a different provider (TripoSR/Meshy).');
+    } else if (errMsg.includes('API key') || errMsg.includes('401') || errMsg.includes('403')) {
+      logLine('💡 Tip: Check your API key in the .env file.');
+    }
+    
     console.error(err);
   } finally {
     generate3dBtn.disabled = false;

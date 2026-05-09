@@ -6,8 +6,6 @@
 [ext_resource type="PackedScene" uid="uid://cdn7d5mxwdyks" path="res://Levels/Main/Geometry/Wall.tscn" id="3_jw8hm"]
 [ext_resource type="Material" uid="uid://sofvlrq3jmka" path="res://Levels/Main/Materials/M_Dark.tres" id="4_m7xar"]
 [ext_resource type="PackedScene" uid="uid://avocado_resource" path="res://sprites/Avocado.glb" id="5_avocado"]
-[ext_resource type="PackedScene" uid="uid://apple_resource" path="res://sprites/RedApple.glb" id="6_redapple"]
-
 [sub_resource type="BoxMesh" id="BoxMesh_egctf"]
 size = Vector3(8, 4, 4)
 
@@ -235,6 +233,3 @@ directional_shadow_max_distance = 250.0
 
 [node name="Avocado" parent="." unique_id=312345678 instance=ExtResource("5_avocado")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 3, 0)
-
-[node name="Apple" parent="." unique_id=987654321 instance=ExtResource("6_redapple")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 3, 0)

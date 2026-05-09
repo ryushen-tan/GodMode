@@ -120,6 +120,68 @@ app.get('/api/sprites', (_req, res) => {
   }
 });
 
+// Ensure all GLB files have .import files (auto-fix missing imports)
+app.post('/api/sprites/ensure-imports', (_req, res) => {
+  try {
+    const { ensureAllImports } = require('./ensure-imports');
+    const files = fs.readdirSync(SPRITES_DIR).filter(f => f.toLowerCase().endsWith('.glb'));
+    let created = 0;
+    
+    for (const glbFile of files) {
+      const glbPath = path.join(SPRITES_DIR, glbFile);
+      const importPath = `${glbPath}.import`;
+      
+      if (!fs.existsSync(importPath)) {
+        const hash = crypto.randomBytes(16).toString('hex');
+        const uid = glbFile.replace(/\.glb$/i, '').replace(/[^a-zA-Z0-9]/g, '_');
+        const importContent = `[remap]
+
+importer="scene"
+importer_version=1
+type="PackedScene"
+uid="uid://${uid}_uid"
+path="res://.godot/imported/${glbFile}-${hash}.scn"
+
+[deps]
+
+source_file="res://sprites/${glbFile}"
+dest_files=["res://.godot/imported/${glbFile}-${hash}.scn"]
+
+[params]
+
+nodes/root_type=""
+nodes/root_name=""
+nodes/apply_root_scale=true
+nodes/root_scale=1.0
+meshes/ensure_tangents=true
+meshes/generate_lods=true
+meshes/create_shadow_meshes=true
+meshes/light_baking=1
+meshes/lightmap_texel_size=0.2
+meshes/force_disable_compression=false
+skins/use_named_skins=true
+animation/import=true
+animation/fps=30
+animation/trimming=false
+animation/remove_immutable_tracks=true
+import_script/path=""
+_subresources={}
+gltf/naming_version=1
+gltf/embedded_image_handling=1
+`;
+        fs.writeFileSync(importPath, importContent);
+        console.log(`[ensure-imports] Created ${glbFile}.import`);
+        created++;
+      }
+    }
+    
+    res.json({ total: files.length, created, message: `Created ${created} missing .import files` });
+  } catch (err) {
+    console.error('[ensure-imports] error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Diagnostic: open a sprite with gltf-transform and report what was loaded.
 // Lets us verify the base GLB is actually being parsed correctly before we
 // try to merge anything into it.
@@ -704,23 +766,65 @@ app.post('/api/3d/stable-fast', async (req, res) => {
     form.append('foreground_ratio', '0.85');       // valid range is 0-1
 
     let glbBuf;
-    try {
-      const stRes = await axios.post(STABILITY_FAST_3D_URL, form, {
-        headers: {
-          Authorization: `Bearer ${STABILITY_API_KEY}`,
-          Accept: 'model/gltf-binary',
-          ...form.getHeaders()
-        },
-        responseType: 'arraybuffer'
-      });
-      glbBuf = Buffer.from(stRes.data);
-    } catch (err) {
-      const status = err.response?.status || 502;
-      let detail = err.message;
-      if (err.response?.data) {
-        detail = Buffer.isBuffer(err.response.data) ? err.response.data.toString() : err.response.data;
+    let lastError;
+    const maxRetries = 2;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 1) {
+          // Exponential backoff: 3s, then 6s
+          const delayMs = 3000 * attempt;
+          console.log(`[stable-fast] retry attempt ${attempt}/${maxRetries} after ${delayMs}ms delay`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+        
+        console.log(`[stable-fast] attempt ${attempt}: POST ${STABILITY_FAST_3D_URL}`);
+        
+        const stRes = await axios.post(STABILITY_FAST_3D_URL, form, {
+          headers: {
+            Authorization: `Bearer ${STABILITY_API_KEY}`,
+            Accept: 'model/gltf-binary',
+            ...form.getHeaders()
+          },
+          responseType: 'arraybuffer',
+          timeout: 60000, // 60s timeout (Stability can be slow)
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+          // Disable HTTP keep-alive to avoid socket reuse issues
+          httpAgent: new (require('http').Agent)({ keepAlive: false }),
+          httpsAgent: new (require('https').Agent)({ keepAlive: false })
+        });
+        glbBuf = Buffer.from(stRes.data);
+        break; // Success - exit retry loop
+      } catch (err) {
+        lastError = err;
+        const isSSLError = err.message && (err.message.includes('SSL') || err.message.includes('ECONNRESET'));
+        
+        // Only retry on SSL/connection errors
+        if (attempt < maxRetries && isSSLError) {
+          console.log(`[stable-fast] SSL error on attempt ${attempt}, retrying...`);
+          continue;
+        }
+        
+        // Final failure or non-retryable error
+        const status = err.response?.status || 502;
+        let detail = err.message;
+        if (err.response?.data) {
+          detail = Buffer.isBuffer(err.response.data) ? err.response.data.toString() : err.response.data;
+        }
+        return res.status(status).json({ 
+          error: `Stability ${status}`,
+          detail,
+          attempts: attempt
+        });
       }
-      return res.status(status).json({ error: `Stability ${status}`, detail });
+    }
+    
+    if (!glbBuf) {
+      return res.status(502).json({ 
+        error: 'Stability API failed after retries',
+        detail: lastError?.message || 'Unknown error'
+      });
     }
 
     // Optional: rescale to base sprite dimensions
@@ -901,8 +1005,13 @@ app.post('/api/3d/replicate-triposr', async (req, res) => {
 
     const outId = `rep-tsr-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
     mergedGlbs.set(outId, glbBuf);
+    
+    // Save to sprites folder  
+    const spritePath = path.join(SPRITES_DIR, `${outId}.glb`);
+    fs.writeFileSync(spritePath, glbBuf);
+    
     const elapsedMs = Date.now() - startedAt;
-    console.log(`[replicate-triposr] ${elapsedMs}ms (Replicate ${prediction.metrics && prediction.metrics.predict_time}s), ${glbBuf.length} bytes`);
+    console.log(`[replicate-triposr] ${elapsedMs}ms (Replicate ${prediction.metrics && prediction.metrics.predict_time}s), saved to ${spritePath}`);
     res.json({
       modelUrl: `${baseUrl()}/merged/${outId}.glb`,
       elapsedMs,
