@@ -71,8 +71,29 @@
       <input type="file" id="file-input" accept="image/*" style="display: none;">
       <span id="file-name"></span>
     </div>
+
+    <div class="generate-section">
+      <button id="generate-3d-btn" class="upload-button">Generate 3D</button>
+    </div>
+
+    <div id="generate-result" class="generate-result" style="display:none;">
+      <h3>Result</h3>
+      <div class="result-row">
+        <div>
+          <div class="result-label">2D image</div>
+          <img id="result-preview" alt="2D export preview" />
+        </div>
+        <div class="result-progress-col">
+          <div class="result-label">Progress</div>
+          <div class="result-progress-bar"><div id="result-progress-fill"></div></div>
+          <div id="result-status">idle</div>
+        </div>
+      </div>
+      <div class="result-log" id="result-log"></div>
+      <div id="result-model" class="result-model"></div>
+    </div>
   </div>
 
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -1,3 +1,9 @@
+import {
+  exportCanvasToFile,
+  MockThreeDProvider,
+  pollThreeDGeneration,
+} from './services.bundle.js';
+
 const addButton = document.getElementById('add-button');
 const panel = document.getElementById('panel');
 const closePanelBtn = document.getElementById('close-panel-btn');
@@ -148,9 +154,79 @@ canvas.addEventListener('mouseup', stopDrawing);
 canvas.addEventListener('mouseleave', stopDrawing);
 
 document.addEventListener('click', (e) => {
-  if (panel.classList.contains('visible') && 
-      !panel.contains(e.target) && 
+  if (panel.classList.contains('visible') &&
+      !panel.contains(e.target) &&
       !addButton.contains(e.target)) {
     togglePanel();
+  }
+});
+
+// ---- Generate 3D pipeline (canvas → 2D image → mock 3D) ----
+const generate3dBtn = document.getElementById('generate-3d-btn');
+const resultBox = document.getElementById('generate-result');
+const resultPreview = document.getElementById('result-preview');
+const resultProgressFill = document.getElementById('result-progress-fill');
+const resultStatus = document.getElementById('result-status');
+const resultLog = document.getElementById('result-log');
+const resultModel = document.getElementById('result-model');
+
+function logLine(text) {
+  const line = document.createElement('div');
+  line.textContent = text;
+  resultLog.appendChild(line);
+  resultLog.scrollTop = resultLog.scrollHeight;
+}
+
+generate3dBtn.addEventListener('click', async () => {
+  generate3dBtn.disabled = true;
+  resultBox.style.display = 'block';
+  resultLog.innerHTML = '';
+  resultModel.innerHTML = '';
+  resultProgressFill.style.width = '0%';
+  resultStatus.textContent = 'exporting…';
+
+  try {
+    // Step 1: export canvas to a PNG File
+    const file = await exportCanvasToFile(canvas, 'sketch.png');
+    logLine(`exported ${file.name} (${file.size} bytes)`);
+    resultPreview.src = URL.createObjectURL(file);
+
+    // Step 2: start the 3D job (mock provider — swap for BackendThreeDProvider when backend exists)
+    const provider = new MockThreeDProvider({ pollsUntilComplete: 4 });
+    const started = await provider.startGeneration({
+      imageUrl: 'mock://uploaded.png',
+      prompt: document.getElementById('prompt-input').value || undefined,
+      mode: 'object',
+    });
+    resultStatus.textContent = started.status;
+    logLine(`job started: ${started.jobId}`);
+
+    // Step 3: poll until completed
+    const result = await pollThreeDGeneration({
+      provider,
+      jobId: started.jobId,
+      intervalMs: 600,
+      onProgress: (job) => {
+        resultStatus.textContent = job.status;
+        if (typeof job.progress === 'number') {
+          resultProgressFill.style.width = job.progress + '%';
+          logLine(`poll: ${job.status} ${job.progress}%`);
+        } else {
+          logLine(`poll: ${job.status}`);
+        }
+      },
+    });
+
+    resultProgressFill.style.width = '100%';
+    resultStatus.textContent = 'completed';
+    logLine(`✅ done (${result.format})`);
+    resultModel.innerHTML =
+      `<div class="result-label">Model URL</div>` +
+      `<a href="${result.modelUrl}" target="_blank" rel="noreferrer">${result.modelUrl}</a>`;
+  } catch (err) {
+    resultStatus.textContent = 'failed';
+    logLine(`❌ ${err.message || err}`);
+  } finally {
+    generate3dBtn.disabled = false;
   }
 });
