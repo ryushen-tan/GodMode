@@ -86,6 +86,46 @@ async function uploadImage(file, endpoint, options = {}) {
   };
 }
 
+// services/image2D/generate2DService.ts
+async function generate2D(request, endpoint, options = {}) {
+  if (!endpoint) throw new Error("generate2D: endpoint is required");
+  if (!request?.imageUrl) throw new Error("generate2D: imageUrl is required");
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options.headers },
+      body: JSON.stringify(request),
+      signal: options.signal
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`generate2D: network error calling ${endpoint}: ${msg}`);
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(
+      `generate2D: ${endpoint} returned ${response.status}${text ? ` \u2014 ${text}` : ""}`
+    );
+  }
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(`generate2D: response from ${endpoint} was not valid JSON`);
+  }
+  if (!data || typeof data !== "object" || typeof data.imageUrl !== "string") {
+    throw new Error(`generate2D: response from ${endpoint} missing string "imageUrl"`);
+  }
+  const r = data;
+  return {
+    imageUrl: r.imageUrl,
+    id: typeof r.id === "string" ? r.id : void 0,
+    autoDescription: typeof r.autoDescription === "string" ? r.autoDescription : void 0,
+    finalPrompt: typeof r.finalPrompt === "string" ? r.finalPrompt : void 0
+  };
+}
+
 // services/threeD/providers/backendThreeDProvider.ts
 var VALID_STATUSES = /* @__PURE__ */ new Set([
   "idle",
@@ -272,6 +312,7 @@ export {
   MockThreeDProvider,
   exportCanvasToBlob,
   exportCanvasToFile,
+  generate2D,
   pollThreeDGeneration,
   startCanvasTo3DGeneration,
   uploadImage

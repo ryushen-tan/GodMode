@@ -1,8 +1,12 @@
 import {
   exportCanvasToFile,
-  MockThreeDProvider,
+  uploadImage,
+  generate2D,
+  BackendThreeDProvider,
   pollThreeDGeneration,
 } from './services.bundle.js';
+
+const BACKEND_URL = 'http://localhost:3001';
 
 const addButton = document.getElementById('add-button');
 const panel = document.getElementById('panel');
@@ -185,27 +189,44 @@ generate3dBtn.addEventListener('click', async () => {
   resultProgressFill.style.width = '0%';
   resultStatus.textContent = 'exporting…';
 
+  const prompt = document.getElementById('prompt-input').value.trim() || undefined;
+
   try {
-    // Step 1: export canvas to a PNG File
+    // 1. Export canvas → PNG file
     const file = await exportCanvasToFile(canvas, 'sketch.png');
     logLine(`exported ${file.name} (${file.size} bytes)`);
     resultPreview.src = URL.createObjectURL(file);
 
-    // Step 2: start the 3D job (mock provider — swap for BackendThreeDProvider when backend exists)
-    const provider = new MockThreeDProvider({ pollsUntilComplete: 4 });
+    // 2. Upload to backend
+    resultStatus.textContent = 'uploading…';
+    const uploaded = await uploadImage(file, `${BACKEND_URL}/api/upload-image`);
+    logLine(`uploaded → ${uploaded.imageUrl}`);
+
+    // 3. AWS Bedrock Stability Control Sketch: pure image-to-image
+    resultStatus.textContent = 'generating 2D (AWS Bedrock)…';
+    logLine('calling AWS Bedrock (Stability Control Sketch, image-to-image)…');
+    const enhanced = await generate2D(
+      { imageUrl: uploaded.imageUrl, prompt },
+      `${BACKEND_URL}/api/generate-2d`,
+    );
+    logLine(`2D ready → ${enhanced.imageUrl}`);
+    resultPreview.src = enhanced.imageUrl;
+
+    // 4. Start 3D job (currently mocked on the backend)
+    resultStatus.textContent = 'starting 3D…';
+    const provider = new BackendThreeDProvider({ baseUrl: BACKEND_URL });
     const started = await provider.startGeneration({
-      imageUrl: 'mock://uploaded.png',
-      prompt: document.getElementById('prompt-input').value || undefined,
+      imageUrl: enhanced.imageUrl,
+      prompt,
       mode: 'object',
     });
-    resultStatus.textContent = started.status;
-    logLine(`job started: ${started.jobId}`);
+    logLine(`3D job started: ${started.jobId}`);
 
-    // Step 3: poll until completed
+    // 5. Poll until completed
     const result = await pollThreeDGeneration({
       provider,
       jobId: started.jobId,
-      intervalMs: 600,
+      intervalMs: 800,
       onProgress: (job) => {
         resultStatus.textContent = job.status;
         if (typeof job.progress === 'number') {
@@ -221,11 +242,12 @@ generate3dBtn.addEventListener('click', async () => {
     resultStatus.textContent = 'completed';
     logLine(`✅ done (${result.format})`);
     resultModel.innerHTML =
-      `<div class="result-label">Model URL</div>` +
+      `<div class="result-label">Model URL (mock — wire real 3D later)</div>` +
       `<a href="${result.modelUrl}" target="_blank" rel="noreferrer">${result.modelUrl}</a>`;
   } catch (err) {
     resultStatus.textContent = 'failed';
     logLine(`❌ ${err.message || err}`);
+    console.error(err);
   } finally {
     generate3dBtn.disabled = false;
   }

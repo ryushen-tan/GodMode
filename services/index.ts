@@ -4,6 +4,9 @@ export type { CanvasExportOptions, CanvasExportMimeType } from "./canvas/types";
 export { uploadImage } from "./upload/imageUploadService";
 export type { UploadedImage, UploadImageOptions } from "./upload/types";
 
+export { generate2D, type Generate2DOptions } from "./image2D/generate2DService";
+export type { Generate2DRequest, Generate2DResult } from "./image2D/types";
+
 export type { ThreeDProvider } from "./threeD/threeDProvider";
 export {
   BackendThreeDProvider,
