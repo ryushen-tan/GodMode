@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;600;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
 </head>
 <body>
   <div id="add-button">
@@ -107,6 +108,15 @@
         </div>
       </div>
       <div class="result-log" id="result-log"></div>
+      <model-viewer
+        id="result-glb-viewer"
+        camera-controls
+        auto-rotate
+        shadow-intensity="1"
+        exposure="1"
+        ar-status="not-presenting"
+        style="display:none; width:100%; height:260px; background:rgba(0,0,0,0.4); border-radius:8px; margin-top:8px;">
+      </model-viewer>
       <div id="result-model" class="result-model"></div>
     </div>
   </div>

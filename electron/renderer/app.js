@@ -852,9 +852,17 @@ generate3dBtn.addEventListener('click', async () => {
     resultProgressFill.style.width = '100%';
     resultStatus.textContent = 'completed';
     logLine(`✅ 3D done (${result.format})`);
+
+    // Show the GLB inline in the panel
+    const viewer = document.getElementById('result-glb-viewer');
+    if (viewer) {
+      viewer.src = result.modelUrl;
+      viewer.style.display = 'block';
+    }
+
     resultModel.innerHTML =
       `<div class="result-label">3D Model (Meshy)</div>` +
-      `<a href="${result.modelUrl}" target="_blank" rel="noreferrer" download>${result.modelUrl}</a>`;
+      `<a href="${result.modelUrl}" target="_blank" rel="noreferrer" download>Download .glb</a>`;
   } catch (err) {
     resultStatus.textContent = 'failed';
     logLine(`❌ ${err.message || err}`);

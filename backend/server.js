@@ -291,6 +291,25 @@ function meshyHeaders() {
   };
 }
 
+// Strip the background to transparent via Stability Remove Background.
+// Meshy gets a cleaner subject and produces a tighter, less wasteful mesh.
+async function removeBackgroundViaBedrock(imageBuffer) {
+  const cmd = new InvokeModelCommand({
+    modelId: 'us.stability.stable-image-remove-background-v1:0',
+    contentType: 'application/json',
+    accept: 'application/json',
+    body: JSON.stringify({
+      image: imageBuffer.toString('base64'),
+      output_format: 'png',
+    }),
+  });
+  const resp = await bedrock.send(cmd);
+  const json = JSON.parse(new TextDecoder().decode(resp.body));
+  const b64 = (json.images && json.images[0]) || json.image;
+  if (!b64) throw new Error('Bedrock remove-bg returned no image');
+  return Buffer.from(b64, 'base64');
+}
+
 // Merge an addition GLB into a base GLB. The addition is translated so its
 // bottom (min.y) sits at the base's top (max.y) plus a small gap, and X/Z
 // centered on the base. Returns the merged GLB as a Buffer.
@@ -387,7 +406,20 @@ app.post('/api/3d/start', async (req, res) => {
   if (!id) return res.status(400).json({ error: 'unsupported imageUrl (must be from /images/)' });
   const stored = images.get(id);
   if (!stored) return res.status(404).json({ error: 'image not found' });
-  const dataUrl = `data:${stored.mime};base64,${stored.buffer.toString('base64')}`;
+
+  // Best-effort: strip the background so Meshy focuses on the subject.
+  // If it fails (filter, missing model access, etc.), fall back to original.
+  let imgBuffer = stored.buffer;
+  let imgMime = stored.mime;
+  try {
+    console.log('[3d/start] removing background…');
+    imgBuffer = await removeBackgroundViaBedrock(stored.buffer);
+    imgMime = 'image/png';
+    console.log(`[3d/start] background removed (${imgBuffer.length} bytes)`);
+  } catch (err) {
+    console.warn('[3d/start] remove-bg failed, sending original:', err.message);
+  }
+  const dataUrl = `data:${imgMime};base64,${imgBuffer.toString('base64')}`;
 
   try {
     const meshyResp = await fetch(`${MESHY_BASE}/image-to-3d`, {
