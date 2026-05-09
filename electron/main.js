@@ -200,6 +200,9 @@ function startFileWatcher() {
   console.log('[GodMode] File watcher started. Game will auto-restart on file changes.');
 }
 
+const { indexSprites } = require("./main/assetSearch/indexSprites");
+const { searchAsset } = require("./main/assetSearch/searchAsset");
+
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
 
@@ -232,6 +235,34 @@ function createWindow() {
 
   ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
     mainWindow.setIgnoreMouseEvents(ignore, options || {});
+  });
+
+  ipcMain.handle("assets:indexSprites", async (_event, args) => {
+    const spritesRoot = args?.spritesRoot;
+    const dbPath = args?.dbPath;
+    const embeddingModel =
+      args?.embeddingModel || process.env.COHERE_EMBED_MODEL || "embed-v4.0";
+    if (typeof indexSprites === 'function') {
+      return await indexSprites({ spritesRoot, dbPath, embeddingModel });
+    } else {
+      console.error('[GodMode] indexSprites function is not defined.');
+      return null;
+    }
+  });
+
+  ipcMain.handle("assets:search", async (_event, args) => {
+    const imageBase64 = args?.imageBase64;
+    const dbPath = args?.dbPath;
+    const embeddingModel =
+      args?.embeddingModel || process.env.COHERE_EMBED_MODEL || "embed-v4.0";
+    if (!imageBase64) throw new Error("assets:search: imageBase64 is required");
+    const buf = Buffer.from(imageBase64, "base64");
+    if (typeof searchAsset === 'function') {
+      return await searchAsset({ imageBuffer: buf, dbPath, embeddingModel });
+    } else {
+      console.error('[GodMode] searchAsset function is not defined.');
+      return null;
+    }
   });
 
   ipcMain.on('launch-godot', () => launchGodot());

@@ -20,6 +20,23 @@ const clearCanvas = document.getElementById('clear-canvas');
 const uploadBtn = document.getElementById('upload-btn');
 const fileInput = document.getElementById('file-input');
 const fileName = document.getElementById('file-name');
+const matchResult = document.getElementById('match-result');
+
+const indexBtn = document.getElementById('index-btn');
+const spritesPathInput = document.getElementById('sprites-path');
+
+async function searchFromBase64DataUrl(dataUrl) {
+  const base64 = String(dataUrl).split(',')[1] || '';
+  if (!base64) return;
+  if (matchResult) matchResult.textContent = 'Searching...';
+  const res = await window.electronAPI.searchAsset({ imageBase64: base64 });
+  if (!matchResult) return;
+  if (res && res.match && res.match.path) {
+    matchResult.textContent = `Match (${res.method}): ${res.match.path}`;
+  } else {
+    matchResult.textContent = 'No match found.';
+  }
+}
 
 let isDrawing = false;
 let currentTool = 'pen';
@@ -149,6 +166,61 @@ uploadBtn.addEventListener('click', () => {
   fileInput.click();
 });
 
+indexBtn?.addEventListener('click', async () => {
+  try {
+    const spritesRoot = spritesPathInput?.value?.trim();
+    if (!spritesRoot) {
+      if (matchResult) matchResult.textContent = 'Please enter a sprites folder path.';
+      return;
+    }
+    if (matchResult) matchResult.textContent = 'Indexing sprites...';
+    const res = await window.electronAPI.indexSprites({ spritesRoot });
+    if (matchResult) matchResult.textContent = `Indexed ${res.indexed} images into ${res.dbPath}`;
+  } catch (err) {
+    if (matchResult) matchResult.textContent = `Index error: ${err.message || String(err)}`;
+  }
+});
+
+// Paste image from clipboard (Cmd/Ctrl+V)
+document.addEventListener('paste', async (e) => {
+  try {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageItem = Array.from(items).find((it) => it.type && it.type.startsWith('image/'));
+    if (!imageItem) return;
+
+    const file = imageItem.getAsFile();
+    if (!file) return;
+
+    if (matchResult) matchResult.textContent = 'Pasted image. Searching...';
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const dataUrl = evt.target.result;
+
+        // Draw to canvas for visibility
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+          const x = (canvas.width - img.width * scale) / 2;
+          const y = (canvas.height - img.height * scale) / 2;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+        };
+        img.src = dataUrl;
+
+        await searchFromBase64DataUrl(dataUrl);
+      } catch (err) {
+        if (matchResult) matchResult.textContent = `Paste search error: ${err.message || String(err)}`;
+      }
+    };
+    reader.readAsDataURL(file);
+  } catch (err) {
+    if (matchResult) matchResult.textContent = `Paste error: ${err.message || String(err)}`;
+  }
+});
+
 fileInput.addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (file) {
@@ -167,6 +239,17 @@ fileInput.addEventListener('change', (e) => {
       img.src = event.target.result;
     };
     reader.readAsDataURL(file);
+
+    // Also try matching this upload against the local DB.
+    const base64Reader = new FileReader();
+    base64Reader.onload = async (evt) => {
+      try {
+        await searchFromBase64DataUrl(evt.target.result);
+      } catch (err) {
+        if (matchResult) matchResult.textContent = `Search error: ${err.message || String(err)}`;
+      }
+    };
+    base64Reader.readAsDataURL(file);
   }
 });
 

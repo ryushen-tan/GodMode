@@ -7,4 +7,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setIgnoreMouseEvents: (ignore, options) => ipcRenderer.send('set-ignore-mouse-events', ignore, options),
   launchGodot:          () => ipcRenderer.send('launch-godot'),
   sendPrompt:           (prompt) => ipcRenderer.invoke('send-prompt', { prompt }),
+  indexSprites:         (args) => ipcRenderer.invoke("assets:indexSprites", args),
+  searchAsset:          (args) => ipcRenderer.invoke("assets:search", args),
 });

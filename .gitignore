@@ -3,6 +3,9 @@ Created by https://www.toptal.com/developers/gitignore/api/nextjs,c,c++,godot,ma
 
 ### Godot
 # example_game/*
+*.sqlite
+.env
+*.env
 
 ### C ###
 # Prerequisites
