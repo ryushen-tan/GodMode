@@ -22,9 +22,6 @@ const fileInput = document.getElementById('file-input');
 const fileName = document.getElementById('file-name');
 const matchResult = document.getElementById('match-result');
 
-const indexBtn = document.getElementById('index-btn');
-const spritesPathInput = document.getElementById('sprites-path');
-
 async function searchFromBase64DataUrl(dataUrl) {
   const base64 = String(dataUrl).split(',')[1] || '';
   if (!base64) return;
@@ -130,6 +127,7 @@ submitBtn.addEventListener('click', async () => {
     agentResult.className = 'agent-result error';
     agentResult.textContent = `Error: ${err.message}`;
   } finally {
+    agentLog.style.display = 'none';
     submitBtn.disabled = false;
     submitLabel.textContent = 'Run Agent';
   }
@@ -164,21 +162,6 @@ clearCanvas.addEventListener('click', () => {
 
 uploadBtn.addEventListener('click', () => {
   fileInput.click();
-});
-
-indexBtn?.addEventListener('click', async () => {
-  try {
-    const spritesRoot = spritesPathInput?.value?.trim();
-    if (!spritesRoot) {
-      if (matchResult) matchResult.textContent = 'Please enter a sprites folder path.';
-      return;
-    }
-    if (matchResult) matchResult.textContent = 'Indexing sprites...';
-    const res = await window.electronAPI.indexSprites({ spritesRoot });
-    if (matchResult) matchResult.textContent = `Indexed ${res.indexed} images into ${res.dbPath}`;
-  } catch (err) {
-    if (matchResult) matchResult.textContent = `Index error: ${err.message || String(err)}`;
-  }
 });
 
 // Paste image from clipboard (Cmd/Ctrl+V)

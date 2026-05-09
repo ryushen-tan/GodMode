@@ -475,6 +475,16 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.floating-log {
+  position: fixed;
+  top: 90px;
+  left: 20px;
+  width: 420px;
+  max-width: calc(100vw - 480px);
+  z-index: 9999;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
 @keyframes slideDown {
   from {
     opacity: 0;

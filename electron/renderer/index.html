@@ -63,16 +63,9 @@
       </button>
     </div>
 
-    <div id="agent-log" class="agent-log" style="display:none;">
-      <div class="agent-log-header">Agent Activity</div>
-      <div id="agent-steps"></div>
-    </div>
-
     <div id="agent-result" class="agent-result" style="display:none;"></div>
 
     <div class="upload-section">
-      <input id="sprites-path" type="text" placeholder="Sprites folder path (e.g. .../godot-FirstPersonStarter-main/sprites)" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ddd;">
-      <button id="index-btn" class="upload-button" type="button">Index Sprites</button>
       <button id="upload-btn" class="upload-button">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -85,6 +78,11 @@
       <span id="file-name"></span>
       <div id="match-result" class="match-result"></div>
     </div>
+  </div>
+
+  <div id="agent-log" class="agent-log floating-log" style="display:none;">
+    <div class="agent-log-header">Agent Activity</div>
+    <div id="agent-steps"></div>
   </div>
 
   <script src="app.js"></script>

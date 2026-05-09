@@ -18,6 +18,7 @@ Rules:
 - You can modify .gd (scripts) OR .tscn (scenes) files
 - For scene files (.tscn): modify existing nodes, don't remove essential elements
 - For adding walls/ramps/objects: modify the appropriate scene file (e.g., Levels/Main/L_Main.tscn)
+- ALL 3D models/sprites (like Avocado, Duck, Fox, WaterBottle) are located in "res://sprites/". e.g., "res://sprites/Avocado.glb"
 - Always write the COMPLETE file content, preserving existing code that should stay
 - Only change what the user asks for
 - Maintain existing code style and structure
