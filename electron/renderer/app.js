@@ -377,22 +377,37 @@ function stopSyntheticProgress() {
   }
 }
 
-// Populate the base-model dropdown from backend's /api/sprites
-(async () => {
+// Populate the base-model dropdown from backend's /api/sprites.
+// Re-fetched on initial load AND whenever the panel is shown, so if the
+// backend wasn't running at startup the list still appears once it's up.
+async function populateSprites() {
   try {
     const res = await fetch(`${BACKEND_URL}/api/sprites`);
     if (!res.ok) return;
     const { sprites } = await res.json();
+    const current = spriteSelect.value;
+    // Replace options, preserving the "(none)" placeholder + current selection.
+    spriteSelect.innerHTML = '<option value="">(none — generate from scratch)</option>';
     for (const name of sprites || []) {
       const opt = document.createElement('option');
       opt.value = name;
       opt.textContent = name.replace(/\.glb$/i, '');
       spriteSelect.appendChild(opt);
     }
-  } catch {
-    // backend not running yet; user can still draw without a base model
+    if (current && Array.from(spriteSelect.options).some((o) => o.value === current)) {
+      spriteSelect.value = current;
+    }
+  } catch (err) {
+    console.warn('populateSprites failed:', err);
   }
-})();
+}
+populateSprites();
+// Re-populate when the user opens the panel — covers the case where they
+// started electron before the backend.
+addButton.addEventListener('click', () => {
+  if (panel.classList.contains('visible')) populateSprites();
+});
+spriteSelect.addEventListener('focus', populateSprites);
 
 function logLine(text) {
   const line = document.createElement('div');
