@@ -344,6 +344,73 @@ const resultLog = document.getElementById('result-log');
 const resultModel = document.getElementById('result-model');
 const spriteSelect = document.getElementById('sprite-select');
 const providerSelect = document.getElementById('provider-select');
+const captureViewer = document.getElementById('capture-viewer');
+
+// Render a base sprite GLB to a PNG Blob using the hidden model-viewer.
+// Resolves once the model is loaded and at least one frame has been drawn.
+async function captureSpriteAsBlob(spriteName) {
+  if (!spriteName || !captureViewer) return null;
+  const url = `${BACKEND_URL}/sprites/${encodeURIComponent(spriteName)}`;
+  await new Promise((resolve, reject) => {
+    let done = false;
+    const onLoad = () => {
+      if (done) return;
+      done = true;
+      captureViewer.removeEventListener('load', onLoad);
+      captureViewer.removeEventListener('error', onError);
+      // Give the renderer a moment to draw the first frame before screenshot.
+      setTimeout(resolve, 200);
+    };
+    const onError = (err) => {
+      if (done) return;
+      done = true;
+      captureViewer.removeEventListener('load', onLoad);
+      captureViewer.removeEventListener('error', onError);
+      reject(err);
+    };
+    captureViewer.addEventListener('load', onLoad);
+    captureViewer.addEventListener('error', onError);
+    captureViewer.src = url;
+  });
+  return await captureViewer.toBlob({ mimeType: 'image/png', idealAspect: true });
+}
+
+// When the user picks a sprite, render it onto the main canvas as the
+// working image so Generate 2D / 3D operate on a faithful view of the
+// chosen GLB instead of an unrelated photo.
+spriteSelect.addEventListener('change', async () => {
+  const spriteName = spriteSelect.value;
+  if (!spriteName) return;
+  try {
+    if (matchResult) matchResult.textContent = `Loading render of ${spriteName}…`;
+    const blob = await captureSpriteAsBlob(spriteName);
+    if (!blob) return;
+    const dataUrl = await new Promise((res) => {
+      const reader = new FileReader();
+      reader.onload = () => res(reader.result);
+      reader.readAsDataURL(blob);
+    });
+    const img = await new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = reject;
+      im.src = dataUrl;
+    });
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+    const x = (canvas.width - img.width * scale) / 2;
+    const y = (canvas.height - img.height * scale) / 2;
+    ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+    baseImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    fileName.textContent = `(render of ${spriteName})`;
+    if (matchResult) matchResult.textContent = `Loaded render of ${spriteName}. Draw on top, then Generate.`;
+  } catch (err) {
+    console.error('captureSpriteAsBlob failed:', err);
+    if (matchResult) matchResult.textContent = `Failed to render ${spriteName}: ${err.message || err}`;
+  }
+});
 
 // Stored after Generate 2D succeeds, consumed by Generate 3D.
 // finalDisplayUrl is what the user sees; imageUrlFor3D is a backend-served

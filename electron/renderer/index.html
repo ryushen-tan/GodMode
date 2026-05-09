@@ -131,6 +131,19 @@
     <div id="agent-steps"></div>
   </div>
 
+  <!-- Hidden model-viewer used only to render base sprites and capture them
+       as 2D images for the canvas. Keep on-screen-but-invisible because
+       <model-viewer> needs to be in the layout to render. -->
+  <model-viewer
+    id="capture-viewer"
+    camera-orbit="0deg 80deg auto"
+    field-of-view="35deg"
+    reveal="auto"
+    interaction-prompt="none"
+    disable-zoom disable-pan disable-tap
+    style="position: fixed; left: -9999px; top: 0; width: 768px; height: 768px; pointer-events: none; opacity: 0;">
+  </model-viewer>
+
   <script type="module" src="app.js"></script>
 </body>
 </html>
