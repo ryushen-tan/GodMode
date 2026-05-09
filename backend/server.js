@@ -19,6 +19,8 @@ const PORT = Number(process.env.BACKEND_PORT || 3001);
 const REGION = process.env.AWS_REGION || 'us-east-1';
 const MODEL_ID = process.env.BEDROCK_IMAGE_MODEL_ID || 'amazon.nova-canvas-v1:0';
 const VISION_MODEL_ID = process.env.BEDROCK_VISION_MODEL_ID || 'us.anthropic.claude-3-5-haiku-20241022-v1:0';
+const MESHY_API_KEY = process.env.MESHY_API_KEY || '';
+const MESHY_BASE = 'https://api.meshy.ai/openapi/v1';
 
 const bedrock = new BedrockRuntimeClient({ region: REGION });
 const bedrockControl = new BedrockClient({ region: REGION });
@@ -239,32 +241,120 @@ app.post('/api/generate-2d', async (req, res) => {
   }
 });
 
-// Mock 3D endpoints (real AWS image-to-3D doesn't exist; swap later)
-app.post('/api/3d/start', (req, res) => {
-  const { imageUrl } = req.body || {};
+// Real 3D generation via Meshy (image-to-3D)
+// Job state: jobId -> { meshyTaskId, lastStatus, lastProgress, lastModelUrl, lastError }
+
+function meshyHeaders() {
+  return {
+    'Authorization': `Bearer ${MESHY_API_KEY}`,
+    'Content-Type': 'application/json',
+  };
+}
+
+function meshyToJobStatus(meshyStatus) {
+  switch (meshyStatus) {
+    case 'PENDING':     return 'queued';
+    case 'IN_PROGRESS': return 'processing';
+    case 'SUCCEEDED':   return 'completed';
+    case 'FAILED':
+    case 'CANCELED':    return 'failed';
+    case 'EXPIRED':     return 'failed';
+    default:            return 'processing';
+  }
+}
+
+app.post('/api/3d/start', async (req, res) => {
+  const { imageUrl, prompt } = req.body || {};
   if (!imageUrl) return res.status(400).json({ error: 'imageUrl required' });
-  const jobId = `job-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
-  jobs.set(jobId, { jobId, polls: 0, pollsUntilDone: 4, imageUrl });
-  res.json({ jobId, status: 'queued' });
+  if (!MESHY_API_KEY) {
+    return res.status(500).json({ error: 'MESHY_API_KEY missing in .env' });
+  }
+
+  // Resolve our /images/<id> URL to a data URL — Meshy needs to be able
+  // to fetch the image, and our backend isn't publicly reachable.
+  const id = imageIdFromUrl(imageUrl);
+  if (!id) return res.status(400).json({ error: 'unsupported imageUrl (must be from /images/)' });
+  const stored = images.get(id);
+  if (!stored) return res.status(404).json({ error: 'image not found' });
+  const dataUrl = `data:${stored.mime};base64,${stored.buffer.toString('base64')}`;
+
+  try {
+    const meshyResp = await fetch(`${MESHY_BASE}/image-to-3d`, {
+      method: 'POST',
+      headers: meshyHeaders(),
+      body: JSON.stringify({
+        image_url: dataUrl,
+        ai_model: 'meshy-4',
+        topology: 'triangle',
+        target_polycount: 30000,
+        should_remesh: true,
+        should_texture: true,
+      }),
+    });
+    if (!meshyResp.ok) {
+      const text = await meshyResp.text().catch(() => '');
+      return res.status(502).json({ error: `meshy POST failed (${meshyResp.status})`, detail: text });
+    }
+    const json = await meshyResp.json();
+    const meshyTaskId = json.result;
+    if (!meshyTaskId) {
+      return res.status(502).json({ error: 'meshy did not return a task id', detail: json });
+    }
+
+    const jobId = `job-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+    jobs.set(jobId, {
+      jobId,
+      meshyTaskId,
+      lastStatus: 'queued',
+      lastProgress: 0,
+      lastModelUrl: null,
+      lastError: null,
+      prompt: prompt || null,
+    });
+    console.log(`[3d/start] jobId=${jobId} meshyTask=${meshyTaskId}`);
+    res.json({ jobId, status: 'queued' });
+  } catch (err) {
+    console.error('[3d/start] error:', err);
+    res.status(500).json({ error: err.message || String(err) });
+  }
 });
 
-app.get('/api/3d/status/:jobId', (req, res) => {
+app.get('/api/3d/status/:jobId', async (req, res) => {
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'unknown job' });
-  job.polls += 1;
-  if (job.polls >= job.pollsUntilDone) {
-    return res.json({
-      jobId: job.jobId,
-      status: 'completed',
-      progress: 100,
-      modelUrl: 'https://example.invalid/mock/model.glb',
+
+  try {
+    const meshyResp = await fetch(`${MESHY_BASE}/image-to-3d/${job.meshyTaskId}`, {
+      method: 'GET',
+      headers: meshyHeaders(),
     });
+    if (!meshyResp.ok) {
+      const text = await meshyResp.text().catch(() => '');
+      return res.status(502).json({ error: `meshy status failed (${meshyResp.status})`, detail: text });
+    }
+    const json = await meshyResp.json();
+    const status = meshyToJobStatus(json.status);
+    const progress = typeof json.progress === 'number' ? json.progress : job.lastProgress;
+    const modelUrl =
+      (json.model_urls && (json.model_urls.glb || json.model_urls.fbx)) || null;
+    const taskError = json.task_error && json.task_error.message;
+
+    job.lastStatus = status;
+    job.lastProgress = progress;
+    if (modelUrl) job.lastModelUrl = modelUrl;
+    if (taskError) job.lastError = taskError;
+
+    res.json({
+      jobId: job.jobId,
+      status,
+      progress,
+      ...(modelUrl ? { modelUrl } : {}),
+      ...(taskError ? { error: taskError } : {}),
+    });
+  } catch (err) {
+    console.error('[3d/status] error:', err);
+    res.status(500).json({ error: err.message || String(err) });
   }
-  res.json({
-    jobId: job.jobId,
-    status: 'processing',
-    progress: Math.round((job.polls / job.pollsUntilDone) * 100),
-  });
 });
 
 app.listen(PORT, () => {

@@ -703,21 +703,32 @@ generate3dBtn.addEventListener('click', async () => {
 
     resultPreview.src = finalDisplayUrl;
 
-    // 4. Start 3D job (currently mocked on the backend)
-    resultStatus.textContent = 'starting 3D…';
+    // 4. Image-to-3D via Meshy. Backend needs a backend-hosted URL,
+    // so if our composited result is a blob: URL, upload it first.
+    resultStatus.textContent = 'starting 3D (Meshy)…';
+    let imageUrlFor3D = finalDisplayUrl;
+    if (imageUrlFor3D.startsWith('blob:')) {
+      const compositeBlob = await fetch(imageUrlFor3D).then((r) => r.blob());
+      const compositeFile = new File([compositeBlob], 'composite.png', { type: 'image/png' });
+      const upComposite = await uploadImage(compositeFile, `${BACKEND_URL}/api/upload-image`);
+      imageUrlFor3D = upComposite.imageUrl;
+      logLine(`uploaded composite → ${imageUrlFor3D}`);
+    }
+
     const provider = new BackendThreeDProvider({ baseUrl: BACKEND_URL });
     const started = await provider.startGeneration({
-      imageUrl: finalDisplayUrl,
+      imageUrl: imageUrlFor3D,
       prompt,
       mode: 'object',
     });
-    logLine(`3D job started: ${started.jobId}`);
+    logLine(`3D job started: ${started.jobId} (Meshy can take 1–3 min)`);
 
-    // 5. Poll until completed
+    // 5. Poll Meshy until completed (longer interval — image-to-3D is slow)
     const result = await pollThreeDGeneration({
       provider,
       jobId: started.jobId,
-      intervalMs: 800,
+      intervalMs: 5000,
+      timeoutMs: 5 * 60 * 1000,
       onProgress: (job) => {
         resultStatus.textContent = job.status;
         if (typeof job.progress === 'number') {
@@ -731,10 +742,10 @@ generate3dBtn.addEventListener('click', async () => {
 
     resultProgressFill.style.width = '100%';
     resultStatus.textContent = 'completed';
-    logLine(`✅ done (${result.format})`);
+    logLine(`✅ 3D done (${result.format})`);
     resultModel.innerHTML =
-      `<div class="result-label">Model URL (mock — wire real 3D later)</div>` +
-      `<a href="${result.modelUrl}" target="_blank" rel="noreferrer">${result.modelUrl}</a>`;
+      `<div class="result-label">3D Model (Meshy)</div>` +
+      `<a href="${result.modelUrl}" target="_blank" rel="noreferrer" download>${result.modelUrl}</a>`;
   } catch (err) {
     resultStatus.textContent = 'failed';
     logLine(`❌ ${err.message || err}`);
