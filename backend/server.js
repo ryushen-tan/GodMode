@@ -542,16 +542,11 @@ app.post('/api/3d/start', async (req, res) => {
         image_url: dataUrl,
         ai_model: 'meshy-6',
         topology: 'triangle',
-        // Lower polycount = faster remesh + faster texture bake. 10k is
-        // plenty for a preview; you can always re-run at higher quality
-        // for the final export.
+        // Lower polycount = faster remesh + faster texture bake.
+        // Doesn't change color/material quality, only mesh density.
         target_polycount: 10000,
         should_remesh: true,
         should_texture: true,
-        // Cheaper texture pass; cuts ~30-40% off total time.
-        texture_richness: 'low',
-        // Skip PBR map generation (the big time sink) — diffuse only.
-        enable_pbr: false,
       }),
     });
     if (!meshyResp.ok) {
