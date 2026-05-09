@@ -63,15 +63,23 @@ if (window.electronAPI) {
     agentLog.style.display = 'block';
     const el = document.createElement('div');
     el.className = 'step-item';
+    
     if (step.type === 'tool_call') {
       const argsStr = Object.entries(step.args || {})
         .map(([k, v]) => `${k}=${JSON.stringify(String(v).slice(0, 60))}`)
         .join(', ');
       el.innerHTML = `<span class="step-tool">${step.tool}</span>(${argsStr})`;
-    } else {
+    } else if (step.type === 'tool_result') {
       const preview = String(step.output || '').slice(0, 100).replace(/\n/g, ' ');
       el.innerHTML = `<span class="step-result">→ ${preview}${step.output?.length > 100 ? '…' : ''}</span>`;
+    } else if (step.type === 'thinking') {
+      el.className = 'step-item thinking';
+      el.innerHTML = `<span class="step-thinking">💭 ${step.text}</span>`;
+    } else if (step.type === 'error') {
+      el.className = 'step-item error';
+      el.innerHTML = `<span class="step-error">⚠️ ${step.text}</span>`;
     }
+    
     agentSteps.appendChild(el);
     agentLog.scrollTop = agentLog.scrollHeight;
   });

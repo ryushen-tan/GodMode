@@ -3,11 +3,11 @@ class_name MovementController
 
 
 @export var gravity_multiplier := 3.0
-@export var speed := 10
+@export var speed := 3  # Further reduced speed for slower running
 @export var acceleration := 8
 @export var deceleration := 10
 @export_range(0.0, 1.0, 0.05) var air_control := 0.3
-@export var jump_height := 50  # Increased for super high jump
+@export var jump_height := 30  # Increased jump height for maximum possible jump
 var direction := Vector3()
 var input_axis := Vector2()
 # Get the gravity from the project settings to be synced with RigidDynamicBody nodes.
@@ -17,12 +17,12 @@ var input_axis := Vector2()
 
 # Called every physics tick. 'delta' is constant
 func _physics_process(delta: float) -> void:
-	input_axis = Input.get_vector(&"move_back", &"move_forward",
-			&"move_left", &"move_right")
+	input_axis = Input.get_vector("move_back", "move_forward",
+			"move_left", "move_right")
 	direction_input()
 	
 	if is_on_floor():
-		if Input.is_action_just_pressed(&"jump"):
+		if Input.is_action_just_pressed("jump"):
 			velocity.y = jump_height
 	else:
 		velocity.y -= gravity * delta
@@ -59,4 +59,3 @@ func accelerate(delta: float) -> void:
 	
 	velocity.x = temp_vel.x
 	velocity.z = temp_vel.z
-

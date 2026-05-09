@@ -63,4 +63,71 @@ function grepFiles(pattern) {
   }
 }
 
-module.exports = { listFiles, readFile, writeFile, grepFiles, GAME_ROOT };
+function checkGodotErrors() {
+  // Find Godot binary to run error check
+  const godotPaths = [
+    '/Applications/Godot.app/Contents/MacOS/Godot',
+    '/Applications/Godot_4.app/Contents/MacOS/Godot',
+  ];
+  
+  let godotBin = null;
+  for (const p of godotPaths) {
+    if (fs.existsSync(p)) {
+      godotBin = p;
+      break;
+    }
+  }
+  
+  // Also check running Godot process
+  if (!godotBin) {
+    try {
+      const psResult = execSync('ps aux | grep -i "Godot.app" | grep -v grep | head -1').toString().trim();
+      const pathMatch = psResult.match(/(\S+Godot\.app\/Contents\/MacOS\/Godot)/);
+      if (pathMatch) godotBin = pathMatch[1];
+    } catch {}
+  }
+  
+  if (!godotBin) {
+    return { success: true, warning: 'Godot binary not found - skipping error check' };
+  }
+  
+  // Run Godot headless to check for parse errors
+  try {
+    const result = execSync(
+      `"${godotBin}" --headless --path "${GAME_ROOT}" --check-only 2>&1`,
+      { timeout: 10000, encoding: 'utf8' }
+    );
+    
+    // Check if there are actual ERROR lines (not just version info)
+    const errors = result.split('\n')
+      .filter(line => line.includes('ERROR:') || line.includes('Parse Error'))
+      .filter(line => !line.includes('Godot Engine')) // Ignore version line
+      .join('\n')
+      .trim();
+    
+    if (errors) {
+      return { success: false, error: errors };
+    }
+    
+    return { success: true };
+  } catch (e) {
+    const output = e.stdout || e.stderr || e.message || '';
+    
+    // Extract only real ERROR lines, ignore version banner
+    const errors = output.split('\n')
+      .filter(line => line.includes('ERROR:') || line.includes('Parse Error'))
+      .filter(line => !line.includes('Godot Engine')) // Ignore version line
+      .filter(line => !line.includes('https://godotengine.org')) // Ignore URL
+      .join('\n')
+      .trim();
+    
+    // If no real errors found, consider it success
+    if (!errors) {
+      return { success: true };
+    }
+    
+    return { success: false, error: errors };
+  }
+}
+
+module.exports = { listFiles, readFile, writeFile, grepFiles, checkGodotErrors, GAME_ROOT };

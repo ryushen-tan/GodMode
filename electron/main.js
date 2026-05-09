@@ -210,6 +210,7 @@ function createWindow() {
     x: 0,
     y: 0,
     transparent: true,
+    hasShadow: false,
     frame: false,
     alwaysOnTop: true,
     skipTaskbar: true,
@@ -240,14 +241,19 @@ function createWindow() {
     if (!key) throw new Error('No Backboard API key found in .env file.');
 
     const steps = [];
-    const result = await runAgent(prompt, key, null, (step) => {
-      steps.push(step);
-      if (!mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('agent-step', step);
-      }
-    });
+    try {
+      const result = await runAgent(prompt, key, null, (step) => {
+        steps.push(step);
+        if (!mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('agent-step', step);
+        }
+      });
 
-    return { ...result, steps };
+      return { ...result, steps };
+    } catch (error) {
+      console.error('[GodMode] Agent error:', error);
+      throw error;
+    }
   });
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
