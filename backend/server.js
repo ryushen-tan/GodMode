@@ -334,6 +334,51 @@ function meshyHeaders() {
   };
 }
 
+// Ask Claude on Bedrock to describe the image as a prompt for Meshy.
+// Meshy uses this prompt to guide colors / materials / style — without it
+// the model regresses toward training-set averages (e.g., green bottles
+// come out cream).
+async function describeImageForMeshy(imageBuffer, mime, userPrompt) {
+  const body = {
+    anthropic_version: 'bedrock-2023-05-31',
+    max_tokens: 120,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: mime || 'image/png',
+              data: imageBuffer.toString('base64'),
+            },
+          },
+          {
+            type: 'text',
+            text:
+              'Describe this object as a detailed prompt for a 3D asset generator. ' +
+              'Include the specific colors, material/finish (glossy, matte, metallic, painted, etc.), ' +
+              'shape proportions, and any decorative features visible. ' +
+              'One concise sentence, ~20 words. No leading text, just the description.' +
+              (userPrompt ? ` The user mentioned: "${userPrompt}". Incorporate that.` : ''),
+          },
+        ],
+      },
+    ],
+  };
+  const cmd = new InvokeModelCommand({
+    modelId: VISION_MODEL_ID,
+    contentType: 'application/json',
+    accept: 'application/json',
+    body: JSON.stringify(body),
+  });
+  const resp = await bedrock.send(cmd);
+  const json = JSON.parse(new TextDecoder().decode(resp.body));
+  const text = json && json.content && json.content[0] && json.content[0].text;
+  return (text || '').trim();
+}
+
 // Strip the background to transparent via Stability Remove Background.
 // Meshy gets a cleaner subject and produces a tighter, less wasteful mesh.
 async function removeBackgroundViaBedrock(imageBuffer) {
@@ -534,6 +579,19 @@ app.post('/api/3d/start', async (req, res) => {
   }
   const dataUrl = `data:${imgMime};base64,${imgBuffer.toString('base64')}`;
 
+  // Describe the image so Meshy gets a prompt that captures color/material
+  // detail. Falls back to the user's prompt or empty.
+  let meshyPrompt = (prompt && prompt.trim()) || '';
+  try {
+    const desc = await describeImageForMeshy(imgBuffer, imgMime, prompt);
+    if (desc) {
+      meshyPrompt = desc;
+      console.log(`[3d/start] auto prompt: "${desc}"`);
+    }
+  } catch (err) {
+    console.warn('[3d/start] image describe failed:', err.message);
+  }
+
   try {
     const meshyResp = await fetch(`${MESHY_BASE}/image-to-3d`, {
       method: 'POST',
@@ -547,6 +605,9 @@ app.post('/api/3d/start', async (req, res) => {
         target_polycount: 10000,
         should_remesh: true,
         should_texture: true,
+        // Critical for color/style fidelity — without a prompt, Meshy
+        // averages toward training-set defaults.
+        prompt: meshyPrompt || undefined,
       }),
     });
     if (!meshyResp.ok) {
@@ -568,11 +629,12 @@ app.post('/api/3d/start', async (req, res) => {
       lastModelUrl: null,
       lastError: null,
       prompt: prompt || null,
+      autoPrompt: meshyPrompt || null,
       baseSprite: baseSprite || null,
       scaleOnly: !!scaleOnly,
     });
     console.log(`[3d/start] jobId=${jobId} meshyTask=${meshyTaskId}`);
-    res.json({ jobId, status: 'queued' });
+    res.json({ jobId, status: 'queued', autoPrompt: meshyPrompt || null });
   } catch (err) {
     console.error('[3d/start] error:', err);
     res.status(500).json({ error: err.message || String(err) });
