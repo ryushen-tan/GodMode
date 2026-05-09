@@ -61,8 +61,8 @@ function setPassthrough(enable) {
   }
 }
 
-// Block clicks when hovering over button or panel, pass through otherwise
-[addButton, panel].forEach((el) => {
+// Block clicks when hovering over button, panel, or floating log, pass through otherwise
+[addButton, panel, agentLog].forEach((el) => {
   el.addEventListener('mouseenter', () => setPassthrough(false));
   el.addEventListener('mouseleave', () => setPassthrough(true));
 });

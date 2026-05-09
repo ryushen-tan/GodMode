@@ -5,6 +5,7 @@ const BACKBOARD_API = 'https://app.backboard.io/api';
 const SYSTEM_PROMPT = `You are GodMode — an expert Godot 4 game development agent.
 
 CRITICAL: Your response MUST be ONLY valid JSON. No text before or after. No markdown. No code fences.
+CRITICAL: DO NOT use any tools or functions (like read_file or edit_file). You already have all necessary file contents in the prompt. You must output the final JSON directly in your response.
 
 Required JSON format:
 {
@@ -19,7 +20,7 @@ Rules:
 - For scene files (.tscn): modify existing nodes, don't remove essential elements
 - For adding walls/ramps/objects: modify the appropriate scene file (e.g., Levels/Main/L_Main.tscn)
 - ALL 3D models/sprites (like Avocado, Duck, Fox, WaterBottle) are located in "res://sprites/". e.g., "res://sprites/Avocado.glb"
-- Always write the COMPLETE file content, preserving existing code that should stay
+- Always write the COMPLETE file content, preserving existing code that should stay. DO NOT truncate. DO NOT use "...". You must output the entire file from top to bottom.
 - Only change what the user asks for
 - Maintain existing code style and structure
 - For Godot 4 GDScript: Use Time.get_ticks_msec() NOT OS.get_ticks_msec()
@@ -111,7 +112,7 @@ async function runAgent(prompt, apiKey, threadId, onStep) {
       
       // Add error context if retrying
       if (lastError) {
-        fullPrompt += `\n\n⚠️ PREVIOUS ATTEMPT FAILED WITH ERRORS:\n${lastError}\n\nPlease fix these errors in your response.`;
+        fullPrompt += `\n\n⚠️ PREVIOUS ATTEMPT FAILED WITH ERRORS:\n${lastError}\n\nDO NOT USE TOOLS. Write the raw JSON output directly starting with { and ending with }.`;
       }
 
       onStep && onStep({ type: 'tool_call', tool: 'backboard_llm', args: { prompt: prompt.slice(0, 80) } });
@@ -120,6 +121,10 @@ async function runAgent(prompt, apiKey, threadId, onStep) {
         content: fullPrompt,
         system_prompt: SYSTEM_PROMPT,
         memory: 'Auto',
+        model: 'claude-3-7-sonnet-20250219',
+        json_output: true,
+        tools: [],
+        tool_choice: "none",
         ...(currentThreadId ? { thread_id: currentThreadId } : {}),
       };
       
@@ -132,7 +137,12 @@ async function runAgent(prompt, apiKey, threadId, onStep) {
 
       // Step 5: Parse the JSON response — try multiple extraction strategies
       let parsed;
-      const raw = (data.content || '').trim();
+      let raw = (data.content || '').trim();
+      
+      // Fallback: if the LLM stubbornly decided to use a tool instead of returning content
+      if (!raw && data.tool_calls && data.tool_calls.length > 0) {
+        throw new Error(`CRITICAL: You attempted to call a tool (${data.tool_calls[0].function?.name}). This is forbidden. You already have the file contents. You MUST output the final JSON directly in your message content.`);
+      }
       
       onStep && onStep({ type: 'thinking', text: `Parsing LLM response (${raw.length} chars)...` });
       
