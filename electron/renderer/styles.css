@@ -148,11 +148,10 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 2px;
   cursor: crosshair;
-  background: rgba(255, 255, 255, 0.9);
+  background: #ffffff;
   width: 100%;
   height: auto;
   margin-bottom: 16px;
-  filter: invert(1) hue-rotate(180deg);
 }
 
 .toolbar {

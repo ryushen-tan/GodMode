@@ -230,7 +230,11 @@ fileInput.addEventListener('change', (e) => {
         const x = (canvas.width - img.width * scale) / 2;
         const y = (canvas.height - img.height * scale) / 2;
 
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Reset compositing in case the eraser was last used
+        ctx.globalCompositeOperation = 'source-over';
+        // Solid white background so areas outside the image aren't transparent
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
         // Snapshot the canvas exactly as the upload landed; this is what
         // we feed to inpaint as the unmodified base image.
@@ -253,19 +257,29 @@ fileInput.addEventListener('change', (e) => {
   }
 });
 
+function getCanvasCoords(e) {
+  const rect = canvas.getBoundingClientRect();
+  // Map display-space mouse coords to canvas-buffer coords.
+  // Necessary because CSS scales the canvas (width:100%) while the
+  // internal buffer is fixed at canvas.width x canvas.height.
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  return {
+    x: (e.clientX - rect.left) * scaleX,
+    y: (e.clientY - rect.top) * scaleY,
+  };
+}
+
 function startDrawing(e) {
   isDrawing = true;
-  const rect = canvas.getBoundingClientRect();
-  lastX = e.clientX - rect.left;
-  lastY = e.clientY - rect.top;
+  const p = getCanvasCoords(e);
+  lastX = p.x;
+  lastY = p.y;
 }
 
 function draw(e) {
   if (!isDrawing) return;
-  
-  const rect = canvas.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
+  const { x, y } = getCanvasCoords(e);
   
   ctx.beginPath();
   ctx.moveTo(lastX, lastY);
