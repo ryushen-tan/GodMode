@@ -166,11 +166,19 @@ brushSize.addEventListener('input', (e) => {
 
 clearCanvas.addEventListener('click', () => {
   if (confirm('Clear the entire canvas?')) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Reset the upload state so the next Generate doesn't compare against
+    // a stale base image.
+    baseImageData = null;
+    fileName.textContent = '';
   }
 });
 
 uploadBtn.addEventListener('click', () => {
+  // Reset value so picking the SAME file again still fires the change event.
+  fileInput.value = '';
   fileInput.click();
 });
 
