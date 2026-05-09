@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Overlay</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="add-button" class="interactive">
+    <span class="plus-icon">+</span>
+  </div>
+
+  <div id="panel" class="interactive">
+    <div class="panel-header">
+      <h2>Sketch & Prompt</h2>
+      <button id="close-panel-btn" class="close-btn">&times;</button>
+    </div>
+
+    <div class="canvas-container">
+      <canvas id="sketch-canvas" width="400" height="400"></canvas>
+      
+      <div class="toolbar">
+        <button id="pen-tool" class="tool-btn active" title="Pen">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+          </svg>
+        </button>
+        <button id="eraser-tool" class="tool-btn" title="Eraser">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 20H7L3 16 13 6l7 7z"></path>
+          </svg>
+        </button>
+        
+        <div class="divider"></div>
+        
+        <input type="color" id="color-picker" value="#000000" title="Color">
+        
+        <div class="brush-size-container">
+          <label for="brush-size" title="Brush Size">Size:</label>
+          <input type="range" id="brush-size" min="1" max="20" value="3">
+          <span id="brush-size-value">3</span>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <button id="clear-canvas" class="tool-btn danger" title="Clear Canvas">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="prompt-section">
+      <label for="prompt-input">Prompt:</label>
+      <textarea id="prompt-input" placeholder="Enter your prompt here..." rows="4"></textarea>
+    </div>
+
+    <div class="upload-section">
+      <button id="upload-btn" class="upload-button">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+        Upload Image
+      </button>
+      <input type="file" id="file-input" accept="image/*" style="display: none;">
+      <span id="file-name"></span>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
