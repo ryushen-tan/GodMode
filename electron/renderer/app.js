@@ -24,6 +24,18 @@ let lastY = 0;
 ctx.lineCap = 'round';
 ctx.lineJoin = 'round';
 
+function setPassthrough(enable) {
+  if (window.electronAPI && window.electronAPI.setIgnoreMouseEvents) {
+    window.electronAPI.setIgnoreMouseEvents(enable, { forward: true });
+  }
+}
+
+// Block clicks when hovering over button or panel, pass through otherwise
+[addButton, panel].forEach((el) => {
+  el.addEventListener('mouseenter', () => setPassthrough(false));
+  el.addEventListener('mouseleave', () => setPassthrough(true));
+});
+
 function togglePanel() {
   panel.classList.toggle('visible');
 }

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen } = require('electron');
+const { app, BrowserWindow, screen, ipcMain } = require('electron');
 const path = require('path');
 
 let mainWindow;
@@ -27,6 +27,14 @@ function createWindow() {
   });
 
   mainWindow.loadFile('renderer/index.html');
+
+  // Default: transparent areas pass clicks through to apps beneath
+  mainWindow.setIgnoreMouseEvents(true, { forward: true });
+
+  // Renderer toggles this when mouse enters/leaves interactive elements
+  ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
+    mainWindow.setIgnoreMouseEvents(ignore, options || {});
+  });
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.key === 'Escape') {
