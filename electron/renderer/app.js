@@ -83,10 +83,14 @@ closePanelBtn.addEventListener('click', togglePanel);
 // ============================================================================
 
 const exportToRedditBtn = document.getElementById('export-to-reddit-btn');
-const REDDIT_UPLOAD_SUBREDDIT = 'SOONHACKATHONTESTING';
+const REDDIT_UPLOAD_SUBREDDIT = 'SOONHackathon';
+const shareToCultsBtn = document.getElementById('share-to-cults-btn');
+let latestThreeDModel = null;
 
 exportToRedditBtn.addEventListener('mouseenter', () => setPassthrough(false));
 exportToRedditBtn.addEventListener('mouseleave', () => setPassthrough(true));
+shareToCultsBtn.addEventListener('mouseenter', () => setPassthrough(false));
+shareToCultsBtn.addEventListener('mouseleave', () => setPassthrough(true));
 
 exportToRedditBtn.addEventListener('click', async () => {
   if (exportToRedditBtn.classList.contains('posting')) return;
@@ -144,6 +148,51 @@ exportToRedditBtn.addEventListener('click', async () => {
     exportToRedditBtn.disabled = false;
     setTimeout(() => {
       exportToRedditBtn.title = 'Export screenshot to Reddit';
+    }, 3000);
+  }
+});
+
+shareToCultsBtn.addEventListener('click', async () => {
+  if (shareToCultsBtn.classList.contains('sharing')) return;
+  if (!latestThreeDModel?.modelUrl && !latestThreeDModel?.cloudinaryGlbUrl) {
+    alert('Generate a 3D model first, then share it to Cults3D.');
+    return;
+  }
+
+  try {
+    shareToCultsBtn.classList.add('sharing');
+    shareToCultsBtn.disabled = true;
+    shareToCultsBtn.title = 'Preparing Cults3D share...';
+
+    const response = await fetch(`${BACKEND_URL}/api/cults/share`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        modelUrl: latestThreeDModel.modelUrl,
+        fileUrl: latestThreeDModel.cloudinaryGlbUrl || null,
+        previewImageUrl: latestThreeDModel.previewImageUrl,
+        imageUrl: latestThreeDModel.cloudinaryPreviewUrl || null,
+        name: latestThreeDModel.name || 'godmode-model.glb'
+      })
+    });
+    const result = await response.json();
+    if (!response.ok || !result.creationUrl) {
+      throw new Error(result.error || 'Failed to publish to Cults3D');
+    }
+
+    shareToCultsBtn.title = 'Published to Cults3D';
+    if (window.electronAPI.openExternal) {
+      window.electronAPI.openExternal(result.creationUrl);
+    }
+  } catch (err) {
+    console.error('[Share to Cults3D] Error:', err);
+    alert(`Failed to share to Cults3D: ${err.message}`);
+    shareToCultsBtn.title = 'Share latest 3D model to Cults3D';
+  } finally {
+    shareToCultsBtn.classList.remove('sharing');
+    shareToCultsBtn.disabled = false;
+    setTimeout(() => {
+      shareToCultsBtn.title = 'Share latest 3D model to Cults3D';
     }, 3000);
   }
 });
@@ -1109,6 +1158,15 @@ generate3dBtn.addEventListener('click', async () => {
 
       // Auto-fill the prompt with the saved sprite path
       const glbFilename = json.modelUrl.split('/').pop().replace(/\.glb$/i, '.glb');
+      latestThreeDModel = {
+        modelUrl: json.modelUrl,
+        cloudinaryGlbUrl: json.cloudinaryGlbUrl || null,
+        previewImageUrl: json.previewImageUrl || null,
+        cloudinaryPreviewUrl: json.cloudinaryPreviewUrl || null,
+        name: glbFilename
+      };
+      shareToCultsBtn.disabled = false;
+      shareToCultsBtn.title = `Share ${glbFilename} to Cults3D`;
       if (glbFilename && promptInput) {
         const spritePath = `res://sprites/${glbFilename}`;
         promptInput.value = `Add ${spritePath} to the scene at position (0, 2, 0)`;
@@ -1164,6 +1222,15 @@ generate3dBtn.addEventListener('click', async () => {
 
       // Auto-fill the prompt with the saved sprite path
       const glbFilename = result.modelUrl.split('/').pop().replace(/\.glb$/i, '.glb');
+      latestThreeDModel = {
+        modelUrl: result.modelUrl,
+        cloudinaryGlbUrl: result.cloudinaryGlbUrl || null,
+        previewImageUrl: result.previewImageUrl || null,
+        cloudinaryPreviewUrl: result.cloudinaryPreviewUrl || null,
+        name: glbFilename
+      };
+      shareToCultsBtn.disabled = false;
+      shareToCultsBtn.title = `Share ${glbFilename} to Cults3D`;
       if (glbFilename && promptInput) {
         const spritePath = `res://sprites/${glbFilename}`;
         promptInput.value = `Add ${spritePath} to the scene at position (0, 2, 0)`;

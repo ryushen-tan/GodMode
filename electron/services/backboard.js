@@ -68,14 +68,14 @@ OR for Reddit posts:
 {
   "action": "post_to_reddit",
   "title": "Post title here",
-  "subreddit": "gamedev",
+  "subreddit": "SOONHackathon",
   "summary": "Posted screenshot to Reddit",
   "thinking": "your reasoning"
 }
 
 Special Actions:
-- To post a screenshot to Reddit: Return {"action": "post_to_reddit", "title": "...", "subreddit": "gamedev", "summary": "...", "thinking": "..."}
-- User can say things like "post a screenshot to reddit" or "share this on r/gamedev"
+- To post a screenshot to Reddit: Return {"action": "post_to_reddit", "title": "...", "subreddit": "SOONHackathon", "summary": "...", "thinking": "..."}
+- User can say things like "post a screenshot to reddit" or "share this on r/SOONHackathon"
 
 Rules for Code Changes:
 - You can modify .gd (scripts) OR .tscn (scenes) files

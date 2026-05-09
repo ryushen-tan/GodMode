@@ -55,6 +55,53 @@ body {
   50% { opacity: 0.8; }
 }
 
+.share-cults-btn {
+  position: fixed;
+  top: 20px;
+  right: 152px;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: #7c3aed;
+  border: 2px solid #a78bfa;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 9998;
+  color: #ffffff;
+}
+
+.share-cults-btn:hover {
+  background: #8b5cf6;
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.45);
+}
+
+.share-cults-btn:active {
+  transform: scale(0.95);
+}
+
+.share-cults-btn.sharing {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+  animation: pulse-cults 1.5s infinite;
+}
+
+.share-cults-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+  filter: grayscale(0.8);
+}
+
+@keyframes pulse-cults {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 0.85; }
+}
+
 #add-button {
   position: fixed;
   top: 20px;

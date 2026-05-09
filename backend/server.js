@@ -69,6 +69,8 @@ const cystack = initializeCyStack();
 // Composio Reddit Integration
 const { getComposioService } = require('./services/composio-reddit');
 const composio = getComposioService();
+const { getCultsService } = require('./services/composio-cults');
+const cults = getCultsService();
 
 tick(`config (port=${PORT}, region=${REGION})`);
 const bedrock = new BedrockRuntimeClient({ region: REGION }); tick('bedrock client');
@@ -176,7 +178,7 @@ app.post('/api/reddit/post', upload.single('screenshot'), async (req, res) => {
     }
 
     const title = req.body.title || 'Check out my game! Made with GodMode 🎮';
-    const subreddit = req.body.subreddit || 'SOONHackathonTesting';
+    const subreddit = req.body.subreddit || 'SOONHackathon';
     const imageBuffer = req.file.buffer;
 
     await composio.initialize();
@@ -903,6 +905,102 @@ async function maybeSendSmsWithCloudinaryLinks(cloud) {
 }
 
 const publicPreviewUrl = (id) => `${baseUrl()}/previews/${id}.png`;
+
+async function uploadBufferToCatbox(buffer, filename, mimeType) {
+  const form = new FormData();
+  form.append('reqtype', 'fileupload');
+  form.append('fileToUpload', new Blob([buffer], { type: mimeType }), filename);
+
+  const response = await fetch('https://catbox.moe/user/api.php', {
+    method: 'POST',
+    body: form
+  });
+  const url = (await response.text()).trim();
+  if (!response.ok || !/^https?:\/\/\S+$/i.test(url)) {
+    throw new Error(`Public model upload failed (${response.status}): ${url.slice(0, 200)}`);
+  }
+  return url;
+}
+
+async function resolvePublicFileUrl(fileUrl, fallbackName, mimeType) {
+  if (!fileUrl) {
+    throw new Error('fileUrl is required');
+  }
+
+  const parsed = new URL(fileUrl, baseUrl());
+  const isLocal = ['localhost', '127.0.0.1', '0.0.0.0'].includes(parsed.hostname);
+  if (!isLocal) {
+    return parsed.toString();
+  }
+
+  const mergedMatch = parsed.pathname.match(/^\/merged\/([^/]+)\.glb$/i);
+  if (mergedMatch) {
+    const id = mergedMatch[1];
+    const buffer = mergedGlbs.get(id);
+    if (!buffer) throw new Error(`Generated model not found in memory: ${id}`);
+    return await uploadBufferToCatbox(buffer, `${id}.glb`, 'model/gltf-binary');
+  }
+
+  const spriteMatch = parsed.pathname.match(/^\/sprites\/([^/]+\.glb)$/i);
+  if (spriteMatch) {
+    const spriteName = decodeURIComponent(spriteMatch[1]);
+    const spritePath = path.join(SPRITES_DIR, spriteName);
+    if (!spritePath.startsWith(SPRITES_DIR) || !fs.existsSync(spritePath)) {
+      throw new Error(`Sprite model not found: ${spriteName}`);
+    }
+    return await uploadBufferToCatbox(fs.readFileSync(spritePath), spriteName, 'model/gltf-binary');
+  }
+
+  const previewMatch = parsed.pathname.match(/^\/previews\/([^/]+)\.png$/i);
+  if (previewMatch) {
+    const id = previewMatch[1];
+    const buffer = mergedPreviews.get(id);
+    if (!buffer) throw new Error(`Generated preview not found in memory: ${id}`);
+    return await uploadBufferToCatbox(buffer, `${id}.png`, 'image/png');
+  }
+
+  const response = await fetch(parsed.toString());
+  if (!response.ok) {
+    throw new Error(`Failed to fetch local file (${response.status})`);
+  }
+  return await uploadBufferToCatbox(Buffer.from(await response.arrayBuffer()), fallbackName, mimeType);
+}
+
+async function createCultsPlaceholderImage(name) {
+  const safeName = String(name || 'GodMode model').replace(/[<>&"]/g, '').slice(0, 80);
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="768">` +
+    `<rect width="100%" height="100%" fill="#17122b"/>` +
+    `<text x="50%" y="45%" text-anchor="middle" fill="#ffffff" font-family="Arial" font-size="56">GodMode 3D Model</text>` +
+    `<text x="50%" y="55%" text-anchor="middle" fill="#c4b5fd" font-family="Arial" font-size="30">${safeName}</text>` +
+    `</svg>`;
+  const buffer = await sharp(Buffer.from(svg)).png().toBuffer();
+  return await uploadBufferToCatbox(buffer, 'godmode-cults-preview.png', 'image/png');
+}
+
+app.post('/api/cults/share', async (req, res) => {
+  try {
+    const { modelUrl, fileUrl, previewImageUrl, imageUrl, name } = req.body || {};
+    const rawModelName = name || 'GodMode generated model.glb';
+    const uploadName = /\.glb$/i.test(rawModelName) ? rawModelName : `${rawModelName}.glb`;
+    const publicFileUrl = fileUrl || await resolvePublicFileUrl(modelUrl, uploadName, 'model/gltf-binary');
+    const publicImageUrl = imageUrl
+      || (previewImageUrl ? await resolvePublicFileUrl(previewImageUrl, `${rawModelName}.png`, 'image/png') : await createCultsPlaceholderImage(rawModelName));
+    const origin = process.env.CULTS_SHARE_ORIGIN || new URL(publicFileUrl).hostname;
+    const share = await cults.createShareUrl(publicFileUrl, origin);
+    const creation = await cults.createCreation({
+      name: rawModelName.replace(/\.glb$/i, '').replace(/[-_]+/g, ' ').slice(0, 80),
+      description: 'AI-generated 3D model created with GodMode.',
+      details: `Shared from GodMode.\n\nModel file: ${publicFileUrl}`,
+      fileUrl: publicFileUrl,
+      imageUrl: publicImageUrl
+    });
+    res.json({ ok: true, ...share, ...creation });
+  } catch (err) {
+    console.error('[cults/share] error:', err);
+    res.status(500).json({ ok: false, error: err.message || String(err) });
+  }
+});
 
 // Stable Fast 3D: single synchronous call, ~3-5 second turnaround.
 // Returns the GLB URL directly (no polling, no jobId machinery).

@@ -3,11 +3,11 @@ class_name MovementController
 
 
 @export var gravity_multiplier := 3.0
-@export var speed := 20  # Increased speed for faster running
-@export var acceleration := 40  # Increased acceleration for quicker speed gain
-@export var deceleration := 20  # Increased deceleration for quicker stops
+@export var speed := 5  # Decreased speed
+@export var acceleration := 10  # Decreased acceleration
+@export var deceleration := 5  # Decreased deceleration
 @export_range(0.0, 1.0, 0.05) var air_control := 0.3
-@export var jump_height := 40  # Increased jump height
+@export var jump_height := 10  # Decreased jump height
 var direction := Vector3()
 var input_axis := Vector2()
 # Get the gravity from the project settings to be synced with RigidDynamicBody nodes.
