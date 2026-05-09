@@ -10,9 +10,12 @@ const fs = require('fs');
 const sharp = require(path.join(__dirname, '..', 'electron', 'node_modules', 'sharp'));
 
 const SIZE = 1024;
-const ICON_SIZE = Math.round(SIZE * 0.78);   // 798 — logo content area
+// Apple's icon-grid recommends the visible glyph occupy ~58–66% of the
+// canvas, with the rest as breathing room. 0.62 matches VS Code / ChatGPT /
+// OpenAI's optical sizing in the dock.
+const ICON_SIZE = Math.round(SIZE * 0.62);   // 635
 const RADIUS = Math.round(SIZE * 0.225);     // 230 — Apple-ish corner radius
-const PAD = Math.round((SIZE - ICON_SIZE) / 2); // 113
+const PAD = Math.round((SIZE - ICON_SIZE) / 2);
 
 const SRC = path.join(__dirname, '..', 'godmodlogo.png');
 const OUT = path.join(__dirname, '..', 'electron', 'icon.png');
