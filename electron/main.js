@@ -4,8 +4,10 @@ const { app, BrowserWindow, screen, ipcMain } = require('electron');
 const { execSync, exec, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { runAgent } = require('./services/backboard');
 
+const IS_WIN = process.platform === 'win32';
 
 let mainWindow;
 let godotProcess = null;
@@ -15,8 +17,13 @@ let restartTimeout = null;
 
 const GAME_PROJECT_PATH = path.join(__dirname, '..', 'example_game', 'godot-FirstPersonStarter-main');
 
-// Common Godot 4 install locations on macOS
-const GODOT_SEARCH_PATHS = [
+// Common Godot 4 install locations per platform
+const GODOT_SEARCH_PATHS = IS_WIN ? [
+  'C:\\Program Files\\Godot\\Godot.exe',
+  'C:\\Program Files\\Godot Engine\\Godot.exe',
+  'C:\\Program Files (x86)\\Godot\\Godot.exe',
+  'C:\\Program Files (x86)\\Godot Engine\\Godot.exe',
+] : [
   '/Applications/Godot.app/Contents/MacOS/Godot',
   '/Applications/Godot_4.app/Contents/MacOS/Godot',
   '/Applications/Godot_mono.app/Contents/MacOS/Godot',
@@ -26,16 +33,25 @@ function findGodotBinary() {
   for (const p of GODOT_SEARCH_PATHS) {
     if (fs.existsSync(p)) return p;
   }
-  // Fall back to PATH
   try {
-    const result = execSync('which godot 2>/dev/null || which godot4 2>/dev/null').toString().trim();
+    const cmd = IS_WIN
+      ? 'where godot 2>nul'
+      : 'which godot 2>/dev/null || which godot4 2>/dev/null';
+    const result = execSync(cmd).toString().trim().split(/\r?\n/)[0].trim();
     if (result) return result;
   } catch {}
   return null;
 }
 
-const SWIFT_SRC = '/tmp/godmode_bounds.swift';
-const SWIFT_BIN = '/tmp/godmode_bounds';
+// ── Window-bounds helper ──────────────────────────────────────────────────────
+// macOS: compile a Swift binary once (CoreGraphics, no special permissions needed)
+// Windows: compile a C# exe once (.NET Framework csc.exe, always available on Win 10/11)
+
+const HELPER_BIN = path.join(os.tmpdir(), IS_WIN ? 'godmode_bounds.exe' : 'godmode_bounds');
+let helperReady = false;
+
+// macOS: CoreGraphics window enumeration
+const SWIFT_SRC = path.join(os.tmpdir(), 'godmode_bounds.swift');
 const SWIFT_CODE = `
 import CoreGraphics
 let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
@@ -57,32 +73,96 @@ for w in list {
 print("none")
 `;
 
-let swiftHelperReady = false;
+// Windows: Win32 EnumWindows + GetWindowRect via .NET Framework P/Invoke
+const WIN_CS_SRC = path.join(os.tmpdir(), 'godmode_bounds.cs');
+const WIN_CS_CODE = `
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+class Program {
+  delegate bool EnumWindowsProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc p, IntPtr l);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll", CharSet=CharSet.Auto)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
+  struct RECT { public int Left, Top, Right, Bottom; }
+  static void Main() {
+    EnumWindows(delegate(IntPtr h, IntPtr l) {
+      if (!IsWindowVisible(h) || IsIconic(h)) return true;
+      var sb = new StringBuilder(256);
+      GetWindowText(h, sb, 256);
+      if (sb.ToString().ToLower().Contains("godot")) {
+        RECT r; GetWindowRect(h, out r);
+        int w = r.Right - r.Left, ht = r.Bottom - r.Top;
+        if (w > 100 && ht > 100) {
+          Console.WriteLine(r.Left + "," + r.Top + "," + w + "," + ht);
+          Environment.Exit(0);
+        }
+      }
+      return true;
+    }, IntPtr.Zero);
+    Console.WriteLine("none");
+  }
+}
+`;
+
+function findCscExe() {
+  const sysRoot = process.env.SystemRoot || 'C:\\Windows';
+  const candidates = [
+    path.join(sysRoot, 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe'),
+    path.join(sysRoot, 'Microsoft.NET', 'Framework', 'v4.0.30319', 'csc.exe'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
 
 // Compile async on first run; reuse binary on subsequent runs
-function buildSwiftHelper(onReady) {
-  if (fs.existsSync(SWIFT_BIN)) {
-    swiftHelperReady = true;
+function buildHelper(onReady) {
+  if (fs.existsSync(HELPER_BIN)) {
+    helperReady = true;
     onReady();
     return;
   }
-  fs.writeFileSync(SWIFT_SRC, SWIFT_CODE);
-  exec(`swiftc ${SWIFT_SRC} -o ${SWIFT_BIN} 2>/dev/null`, (err) => {
-    if (!err) {
-      swiftHelperReady = true;
-      console.log('[GodMode] Swift helper compiled.');
-    } else {
-      console.error('[GodMode] Swift compile failed:', err.message);
+
+  if (IS_WIN) {
+    const csc = findCscExe();
+    if (!csc) {
+      console.warn('[GodMode] .NET Framework csc.exe not found — window tracking disabled.');
+      onReady();
+      return;
     }
-    onReady();
-  });
+    fs.writeFileSync(WIN_CS_SRC, WIN_CS_CODE);
+    exec(`"${csc}" /nologo /out:"${HELPER_BIN}" "${WIN_CS_SRC}"`, (err) => {
+      if (!err) {
+        helperReady = true;
+        console.log('[GodMode] C# window helper compiled.');
+      } else {
+        console.error('[GodMode] C# compile failed:', err.message);
+      }
+      onReady();
+    });
+  } else {
+    fs.writeFileSync(SWIFT_SRC, SWIFT_CODE);
+    exec(`swiftc "${SWIFT_SRC}" -o "${HELPER_BIN}" 2>/dev/null`, (err) => {
+      if (!err) {
+        helperReady = true;
+        console.log('[GodMode] Swift helper compiled.');
+      } else {
+        console.error('[GodMode] Swift compile failed:', err.message);
+      }
+      onReady();
+    });
+  }
 }
 
-// Use compiled CoreGraphics binary — no special permissions required on macOS
+// Use compiled bounds binary — no special permissions required on either platform
 function getGodotWindowBounds() {
-  if (!swiftHelperReady) return null;
+  if (!helperReady) return null;
   try {
-    const result = execSync(SWIFT_BIN, { timeout: 500 }).toString().trim();
+    const result = execSync(`"${HELPER_BIN}"`, { timeout: 500 }).toString().trim();
     if (result === 'none' || !result) return null;
     const [x, y, w, h] = result.split(',').map(Number);
     if ([x, y, w, h].some(isNaN)) return null;
@@ -111,17 +191,24 @@ function startTracking() {
 
 function findRunningGodotInfo() {
   try {
+    if (IS_WIN) {
+      const result = execSync('tasklist /FI "IMAGENAME eq Godot*" /NH /FO CSV 2>nul').toString().trim();
+      if (!result || result.toLowerCase().includes('no tasks')) return null;
+      for (const line of result.split(/\r?\n/)) {
+        const parts = line.split(',').map(s => s.replace(/"/g, '').trim());
+        if (parts[0] && parts[0].toLowerCase().startsWith('godot')) {
+          const pid = parseInt(parts[1]);
+          if (!isNaN(pid)) return { pid, binaryPath: findGodotBinary() };
+        }
+      }
+      return null;
+    }
     const result = execSync('ps aux | grep -i "Godot.app" | grep -v grep | head -1').toString().trim();
     if (!result) return null;
-    
-    // Extract PID (first column after username)
     const parts = result.split(/\s+/);
     const pid = parseInt(parts[1]);
-    
-    // Extract the full path to the Godot binary
     const pathMatch = result.match(/(\S+Godot\.app\/Contents\/MacOS\/Godot)/);
     const binaryPath = pathMatch ? pathMatch[1] : null;
-    
     return { pid, binaryPath };
   } catch {
     return null;
@@ -140,22 +227,27 @@ function restartGodot(delayMs = 500) {
 
   // If Godot is running externally (user launched it manually)
   const info = findRunningGodotInfo();
-  if (info && info.pid && info.binaryPath) {
+  if (info && info.pid) {
     console.log(`[GodMode] Restarting external Godot (PID: ${info.pid})...`);
     try {
-      // Kill the external Godot process
-      execSync(`kill ${info.pid}`);
-      // Wait and relaunch with the same binary
+      execSync(IS_WIN ? `taskkill /PID ${info.pid} /F` : `kill ${info.pid}`);
       setTimeout(() => {
-        console.log(`[GodMode] Relaunching Godot from: ${info.binaryPath}`);
-        exec(`"${info.binaryPath}" --path "${GAME_PROJECT_PATH}" &`);
+        if (info.binaryPath) {
+          console.log(`[GodMode] Relaunching Godot from: ${info.binaryPath}`);
+          if (IS_WIN) {
+            spawn(info.binaryPath, ['--path', GAME_PROJECT_PATH], { detached: true, stdio: 'ignore' }).unref();
+          } else {
+            exec(`"${info.binaryPath}" --path "${GAME_PROJECT_PATH}" &`);
+          }
+        } else {
+          launchGodot();
+        }
       }, delayMs);
     } catch (err) {
       console.error('[GodMode] Failed to restart external Godot:', err.message);
     }
   } else {
     console.log('[GodMode] No running Godot found to restart.');
-    // Try to launch if binary exists
     launchGodot();
   }
 }
@@ -294,7 +386,7 @@ function createWindow() {
   ipcMain.handle('capture-game-window', async () => {
     try {
       const { desktopCapturer } = require('electron');
-      
+
       // Get all windows
       const sources = await desktopCapturer.getSources({
         types: ['window'],
@@ -302,7 +394,7 @@ function createWindow() {
       });
 
       // Find Godot window
-      const godotWindow = sources.find(source => 
+      const godotWindow = sources.find(source =>
         source.name.toLowerCase().includes('godot') ||
         source.name.toLowerCase().includes('game')
       );
@@ -338,7 +430,7 @@ function createWindow() {
 
   // Give the window a moment to load, then start everything
   mainWindow.webContents.once('did-finish-load', () => {
-    buildSwiftHelper(() => {
+    buildHelper(() => {
       launchGodot();
       startFileWatcher();
       // Wait 2s for Godot to open its window before we start tracking
