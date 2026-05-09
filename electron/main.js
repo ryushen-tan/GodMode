@@ -1,11 +1,17 @@
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+
 const { app, BrowserWindow, screen, ipcMain } = require('electron');
 const { execSync, exec, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { runAgent } = require('./services/backboard');
+
 
 let mainWindow;
 let godotProcess = null;
 let trackingInterval = null;
+let fileWatcher = null;
+let restartTimeout = null;
 
 const GAME_PROJECT_PATH = path.join(__dirname, '..', 'example_game', 'godot-FirstPersonStarter-main');
 
@@ -92,12 +98,64 @@ function startTracking() {
     const bounds = getGodotWindowBounds();
     if (bounds) {
       mainWindow.setBounds(bounds, false);
-      if (!mainWindow.isVisible()) mainWindow.show();
+      if (!mainWindow.isVisible()) mainWindow.showInactive();
       mainWindow.webContents.send('godot-status', 'running');
     } else {
+      if (mainWindow.isVisible()) mainWindow.hide();
       mainWindow.webContents.send('godot-status', 'waiting');
     }
   }, 250);
+}
+
+function findRunningGodotInfo() {
+  try {
+    const result = execSync('ps aux | grep -i "Godot.app" | grep -v grep | head -1').toString().trim();
+    if (!result) return null;
+    
+    // Extract PID (first column after username)
+    const parts = result.split(/\s+/);
+    const pid = parseInt(parts[1]);
+    
+    // Extract the full path to the Godot binary
+    const pathMatch = result.match(/(\S+Godot\.app\/Contents\/MacOS\/Godot)/);
+    const binaryPath = pathMatch ? pathMatch[1] : null;
+    
+    return { pid, binaryPath };
+  } catch {
+    return null;
+  }
+}
+
+function restartGodot() {
+  // If we launched Godot ourselves
+  if (godotProcess) {
+    console.log('[GodMode] Restarting Godot (managed process)...');
+    godotProcess.kill();
+    godotProcess = null;
+    setTimeout(launchGodot, 500);
+    return;
+  }
+
+  // If Godot is running externally (user launched it manually)
+  const info = findRunningGodotInfo();
+  if (info && info.pid && info.binaryPath) {
+    console.log(`[GodMode] Restarting external Godot (PID: ${info.pid})...`);
+    try {
+      // Kill the external Godot process
+      execSync(`kill ${info.pid}`);
+      // Wait and relaunch with the same binary
+      setTimeout(() => {
+        console.log(`[GodMode] Relaunching Godot from: ${info.binaryPath}`);
+        exec(`"${info.binaryPath}" --path "${GAME_PROJECT_PATH}" &`);
+      }, 500);
+    } catch (err) {
+      console.error('[GodMode] Failed to restart external Godot:', err.message);
+    }
+  } else {
+    console.log('[GodMode] No running Godot found to restart.');
+    // Try to launch if binary exists
+    launchGodot();
+  }
 }
 
 function launchGodot() {
@@ -122,12 +180,33 @@ function launchGodot() {
   });
 }
 
+function startFileWatcher() {
+  if (fileWatcher) return;
+
+  const WATCHED_EXTS = new Set(['.gd', '.tscn', '.tres', '.godot']);
+
+  fileWatcher = fs.watch(GAME_PROJECT_PATH, { recursive: true }, (event, filename) => {
+    if (!filename) return;
+    const ext = path.extname(filename);
+    if (!WATCHED_EXTS.has(ext)) return;
+    if (path.basename(filename).startsWith('.')) return;
+
+    console.log(`[GodMode] File changed: ${filename}`);
+
+    if (restartTimeout) clearTimeout(restartTimeout);
+    restartTimeout = setTimeout(() => restartGodot(), 300);
+  });
+
+  console.log('[GodMode] File watcher started. Game will auto-restart on file changes.');
+}
+
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
 
   mainWindow = new BrowserWindow({
     width,
     height,
+    show: false,
     x: 0,
     y: 0,
     transparent: true,
@@ -156,6 +235,21 @@ function createWindow() {
 
   ipcMain.on('launch-godot', () => launchGodot());
 
+  ipcMain.handle('send-prompt', async (_event, { prompt }) => {
+    const key = process.env.BACKBOARD_API_KEY || '';
+    if (!key) throw new Error('No Backboard API key found in .env file.');
+
+    const steps = [];
+    const result = await runAgent(prompt, key, null, (step) => {
+      steps.push(step);
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('agent-step', step);
+      }
+    });
+
+    return { ...result, steps };
+  });
+
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.key === 'Escape') {
       mainWindow.webContents.send('close-panel');
@@ -170,6 +264,7 @@ function createWindow() {
   mainWindow.webContents.once('did-finish-load', () => {
     buildSwiftHelper(() => {
       launchGodot();
+      startFileWatcher();
       // Wait 2s for Godot to open its window before we start tracking
       setTimeout(startTracking, 2000);
     });
@@ -185,6 +280,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (trackingInterval) clearInterval(trackingInterval);
+  if (fileWatcher) fileWatcher.close();
   if (godotProcess) godotProcess.kill();
   if (process.platform !== 'darwin') app.quit();
 });
