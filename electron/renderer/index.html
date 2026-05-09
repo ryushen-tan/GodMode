@@ -8,6 +8,7 @@
 </head>
 <body>
   <div id="add-button">
+    <span id="status-dot" class="status-dot waiting"></span>
     <span class="add-label">Add</span>
   </div>
 
@@ -56,8 +57,13 @@
 
     <div class="prompt-section">
       <label for="prompt-input">Prompt:</label>
-      <textarea id="prompt-input" placeholder="Enter your prompt here..." rows="4"></textarea>
+      <textarea id="prompt-input" placeholder="e.g. Make the player move faster, add a double jump, change gravity..." rows="4"></textarea>
+      <button id="submit-prompt-btn" class="submit-btn">
+        <span id="submit-label">Run Agent</span>
+      </button>
     </div>
+
+    <div id="agent-result" class="agent-result" style="display:none;"></div>
 
     <div class="upload-section">
       <button id="upload-btn" class="upload-button">
@@ -70,6 +76,7 @@
       </button>
       <input type="file" id="file-input" accept="image/*" style="display: none;">
       <span id="file-name"></span>
+      <div id="match-result" class="match-result"></div>
     </div>
 
     <div class="generate-section">
@@ -92,6 +99,11 @@
       <div class="result-log" id="result-log"></div>
       <div id="result-model" class="result-model"></div>
     </div>
+  </div>
+
+  <div id="agent-log" class="agent-log floating-log" style="display:none;">
+    <div class="agent-log-header">Agent Activity</div>
+    <div id="agent-steps"></div>
   </div>
 
   <script type="module" src="app.js"></script>
