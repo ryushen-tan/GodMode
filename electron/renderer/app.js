@@ -962,10 +962,16 @@ generate3dBtn.addEventListener('click', async () => {
   const baseSprite = spriteSelect.value || null;
 
   try {
-    if (provider === 'stable-fast' || provider === 'triposr') {
+    if (provider === 'stable-fast' || provider === 'triposr' || provider === 'replicate-triposr') {
       const isStableFast = provider === 'stable-fast';
-      const label = isStableFast ? 'Stable Fast 3D' : 'TripoSR (AWS)';
-      const endpoint = isStableFast ? '/api/3d/stable-fast' : '/api/3d/triposr';
+      const label =
+        provider === 'stable-fast' ? 'Stable Fast 3D'
+        : provider === 'replicate-triposr' ? 'TripoSR (Replicate)'
+        : 'TripoSR (AWS)';
+      const endpoint =
+        provider === 'stable-fast' ? '/api/3d/stable-fast'
+        : provider === 'replicate-triposr' ? '/api/3d/replicate-triposr'
+        : '/api/3d/triposr';
 
       resultStatus.textContent = 'preparing image…';
       // Stable Fast 3D needs >=640px and benefits from a slight blur to

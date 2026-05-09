@@ -52,6 +52,9 @@ const MESHY_BASE = 'https://api.meshy.ai/openapi/v1';
 const STABILITY_API_KEY = process.env.STABILITY_API_KEY || '';
 const STABILITY_FAST_3D_URL = 'https://api.stability.ai/v2beta/3d/stable-fast-3d';
 const TRIPOSR_URL = (process.env.TRIPOSR_URL || '').replace(/\/+$/, '');
+const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN || '';
+// camenduru/tripo-sr stable revision hash — the well-known hosted TripoSR.
+const REPLICATE_TRIPOSR_VERSION = 'e0d3fe8abce3ba86497ea3530d9eae59af7b2231b6c82bedfc32b0732d35ec3a';
 
 tick(`config (port=${PORT}, region=${REGION})`);
 const bedrock = new BedrockRuntimeClient({ region: REGION }); tick('bedrock client');
@@ -790,6 +793,93 @@ app.post('/api/3d/triposr', async (req, res) => {
     });
   } catch (err) {
     console.error('[triposr] error:', err);
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// Replicate-hosted TripoSR (camenduru/tripo-sr). Polls until done; usually
+// 5–10s warm, longer on cold start.
+app.post('/api/3d/replicate-triposr', async (req, res) => {
+  const { imageUrl, baseSprite } = req.body || {};
+  if (!imageUrl) return res.status(400).json({ error: 'imageUrl required' });
+  if (!REPLICATE_API_TOKEN) {
+    return res.status(500).json({ error: 'REPLICATE_API_TOKEN missing in .env' });
+  }
+
+  const id = imageIdFromUrl(imageUrl);
+  if (!id) return res.status(400).json({ error: 'unsupported imageUrl' });
+  const stored = images.get(id);
+  if (!stored) return res.status(404).json({ error: 'image not found' });
+
+  const dataUrl = `data:${stored.mime || 'image/png'};base64,${stored.buffer.toString('base64')}`;
+  const startedAt = Date.now();
+
+  try {
+    // Kick off prediction
+    const startRes = await fetch('https://api.replicate.com/v1/predictions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${REPLICATE_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        version: REPLICATE_TRIPOSR_VERSION,
+        input: { image: dataUrl, do_remove_background: true, foreground_ratio: 0.85 },
+      }),
+    });
+    if (!startRes.ok) {
+      const text = await startRes.text().catch(() => '');
+      return res.status(502).json({ error: `Replicate start ${startRes.status}`, detail: text });
+    }
+    const startJson = await startRes.json();
+    const getUrl = startJson.urls && startJson.urls.get;
+    if (!getUrl) return res.status(502).json({ error: 'Replicate returned no poll URL', detail: startJson });
+
+    // Poll until done (max 5 min)
+    const deadline = Date.now() + 5 * 60 * 1000;
+    let prediction = startJson;
+    while (Date.now() < deadline && !['succeeded', 'failed', 'canceled'].includes(prediction.status)) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const poll = await fetch(getUrl, { headers: { Authorization: `Bearer ${REPLICATE_API_TOKEN}` } });
+      prediction = await poll.json();
+    }
+    if (prediction.status !== 'succeeded') {
+      return res.status(502).json({ error: `Replicate ${prediction.status}`, detail: prediction.error || prediction });
+    }
+
+    // Output may be a URL string or array of URLs (depends on model). TripoSR
+    // returns an array where one entry is the .glb file.
+    const outputs = Array.isArray(prediction.output) ? prediction.output : [prediction.output];
+    const glbUrl = outputs.find((u) => typeof u === 'string' && /\.glb($|\?)/i.test(u))
+      || outputs.find((u) => typeof u === 'string');
+    if (!glbUrl) return res.status(502).json({ error: 'Replicate output had no GLB', detail: prediction.output });
+
+    const dl = await fetch(glbUrl);
+    if (!dl.ok) return res.status(502).json({ error: `Replicate GLB fetch ${dl.status}` });
+    let glbBuf = Buffer.from(await dl.arrayBuffer());
+
+    if (baseSprite) {
+      const basePath = path.join(SPRITES_DIR, baseSprite);
+      if (fs.existsSync(basePath)) {
+        try {
+          glbBuf = await scaleGlbToMatchBase(glbBuf, basePath);
+        } catch (err) {
+          console.warn('[replicate-triposr] scale failed:', err.message);
+        }
+      }
+    }
+
+    const outId = `rep-tsr-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+    mergedGlbs.set(outId, glbBuf);
+    const elapsedMs = Date.now() - startedAt;
+    console.log(`[replicate-triposr] ${elapsedMs}ms (Replicate ${prediction.metrics && prediction.metrics.predict_time}s), ${glbBuf.length} bytes`);
+    res.json({
+      modelUrl: `${baseUrl()}/merged/${outId}.glb`,
+      elapsedMs,
+      format: 'glb',
+    });
+  } catch (err) {
+    console.error('[replicate-triposr] error:', err);
     res.status(500).json({ error: err.message || String(err) });
   }
 });
