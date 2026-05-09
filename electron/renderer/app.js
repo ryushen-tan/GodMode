@@ -1,5 +1,6 @@
 const addButton = document.getElementById('add-button');
 const panel = document.getElementById('panel');
+const statusDot = document.getElementById('status-dot');
 const closePanelBtn = document.getElementById('close-panel-btn');
 const canvas = document.getElementById('sketch-canvas');
 const ctx = canvas.getContext('2d');
@@ -43,11 +44,13 @@ function togglePanel() {
 addButton.addEventListener('click', togglePanel);
 closePanelBtn.addEventListener('click', togglePanel);
 
-if (window.electronAPI && window.electronAPI.onClosePanel) {
+if (window.electronAPI) {
   window.electronAPI.onClosePanel(() => {
-    if (panel.classList.contains('visible')) {
-      togglePanel();
-    }
+    if (panel.classList.contains('visible')) togglePanel();
+  });
+
+  window.electronAPI.onGodotStatus((status) => {
+    statusDot.className = `status-dot ${status}`;
   });
 }
 
