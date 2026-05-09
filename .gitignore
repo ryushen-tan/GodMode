@@ -7,6 +7,10 @@ Created by https://www.toptal.com/developers/gitignore/api/nextjs,c,c++,godot,ma
 .env
 *.env
 
+*.glb
+*.import
+*.jpg
+
 ### C ###
 # Prerequisites
 *.d

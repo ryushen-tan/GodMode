@@ -15,6 +15,9 @@ export type ThreeDGenerationJob = {
   status: ThreeDGenerationStatus;
   progress?: number;
   modelUrl?: string;
+  previewImageUrl?: string;
+  cloudinaryPreviewUrl?: string;
+  cloudinaryGlbUrl?: string;
   error?: string;
 };
 
@@ -32,5 +35,8 @@ export type StartThreeDGenerationResponse = {
 export type ThreeDGenerationResult = {
   jobId: string;
   modelUrl: string;
+  previewImageUrl?: string;
+  cloudinaryPreviewUrl?: string;
+  cloudinaryGlbUrl?: string;
   format: ThreeDModelFormat;
 };

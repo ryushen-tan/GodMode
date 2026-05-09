@@ -1014,9 +1014,13 @@ generate3dBtn.addEventListener('click', async () => {
         viewer.src = json.modelUrl;
         viewer.style.display = 'block';
       }
+      const glbLink = json.cloudinaryGlbUrl || json.modelUrl;
+      const previewLink = json.cloudinaryPreviewUrl || json.previewImageUrl;
       resultModel.innerHTML =
         `<div class="result-label">3D Model (${label}, ${json.elapsedMs}ms)</div>` +
-        `<a href="${json.modelUrl}" target="_blank" rel="noreferrer" download>Download .glb</a>`;
+        `<a href="${glbLink}" target="_blank" rel="noreferrer" download>Download .glb</a>` +
+        (previewLink ? `<div style="margin-top:6px;"><a href="${previewLink}" target="_blank" rel="noreferrer">Preview image</a></div>` : '') +
+        (json.cloudinaryGlbUrl ? `<div style="margin-top:6px;"><div class="result-label">Cloudinary</div><a href="${json.cloudinaryGlbUrl}" target="_blank" rel="noreferrer">GLB CDN</a><br/><a href="${json.cloudinaryPreviewUrl}" target="_blank" rel="noreferrer">Preview CDN</a></div>` : '');
     } else {
       // Meshy: queue + poll
       resultStatus.textContent = 'starting 3D (Meshy)…';
@@ -1056,9 +1060,13 @@ generate3dBtn.addEventListener('click', async () => {
         viewer.src = result.modelUrl;
         viewer.style.display = 'block';
       }
+      const glbLink = result.cloudinaryGlbUrl || result.modelUrl;
+      const previewLink = result.cloudinaryPreviewUrl || result.previewImageUrl;
       resultModel.innerHTML =
         `<div class="result-label">3D Model (Meshy)</div>` +
-        `<a href="${result.modelUrl}" target="_blank" rel="noreferrer" download>Download .glb</a>`;
+        `<a href="${glbLink}" target="_blank" rel="noreferrer" download>Download .glb</a>` +
+        (previewLink ? `<div style="margin-top:6px;"><a href="${previewLink}" target="_blank" rel="noreferrer">Preview image</a></div>` : '') +
+        (result.cloudinaryGlbUrl ? `<div style="margin-top:6px;"><div class="result-label">Cloudinary</div><a href="${result.cloudinaryGlbUrl}" target="_blank" rel="noreferrer">GLB CDN</a><br/><a href="${result.cloudinaryPreviewUrl}" target="_blank" rel="noreferrer">Preview CDN</a></div>` : '');
     }
   } catch (err) {
     stopSyntheticProgress();

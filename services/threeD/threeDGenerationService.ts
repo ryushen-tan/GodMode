@@ -96,6 +96,9 @@ export async function pollThreeDGeneration(
       return {
         jobId: job.jobId,
         modelUrl: job.modelUrl,
+        previewImageUrl: job.previewImageUrl,
+        cloudinaryPreviewUrl: job.cloudinaryPreviewUrl,
+        cloudinaryGlbUrl: job.cloudinaryGlbUrl,
         format: inferFormat(job.modelUrl),
       };
     }

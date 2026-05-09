@@ -96,6 +96,17 @@ export class BackendThreeDProvider implements ThreeDProvider {
       status: data.status,
       progress: typeof data.progress === "number" ? data.progress : undefined,
       modelUrl: typeof data.modelUrl === "string" ? data.modelUrl : undefined,
+      previewImageUrl:
+        typeof data.previewImageUrl === "string" ? data.previewImageUrl : undefined,
+      cloudinaryPreviewUrl:
+        typeof (data as { cloudinaryPreviewUrl?: unknown }).cloudinaryPreviewUrl ===
+        "string"
+          ? (data as { cloudinaryPreviewUrl: string }).cloudinaryPreviewUrl
+          : undefined,
+      cloudinaryGlbUrl:
+        typeof (data as { cloudinaryGlbUrl?: unknown }).cloudinaryGlbUrl === "string"
+          ? (data as { cloudinaryGlbUrl: string }).cloudinaryGlbUrl
+          : undefined,
       error: typeof data.error === "string" ? data.error : undefined,
     };
   }
