@@ -101,7 +101,9 @@ function startTracking() {
       if (!mainWindow.isVisible()) mainWindow.showInactive();
       mainWindow.webContents.send('godot-status', 'running');
     } else {
-      if (mainWindow.isVisible()) mainWindow.hide();
+      // No Godot detected — keep overlay fullscreen + visible so the
+      // sketch panel/Generate 3D pipeline is still usable on its own.
+      if (!mainWindow.isVisible()) mainWindow.showInactive();
       mainWindow.webContents.send('godot-status', 'waiting');
     }
   }, 250);
@@ -209,7 +211,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width,
     height,
-    show: false,
+    show: true,
     x: 0,
     y: 0,
     transparent: true,
