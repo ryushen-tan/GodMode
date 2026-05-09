@@ -35,7 +35,10 @@ export class BackendThreeDProvider implements ThreeDProvider {
     }
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.headers = options.headers ?? {};
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    // Bind fetch to globalThis so calling it via `this.fetchImpl(...)` doesn't
+    // rebind `this` to the provider instance (browsers reject that with
+    // "Illegal invocation").
+    this.fetchImpl = options.fetchImpl ?? fetch.bind(globalThis);
   }
 
   async startGeneration(

@@ -146,7 +146,7 @@ var BackendThreeDProvider = class {
     }
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.headers = options.headers ?? {};
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl ?? fetch.bind(globalThis);
   }
   async startGeneration(request) {
     const url = `${this.baseUrl}/api/3d/start`;
