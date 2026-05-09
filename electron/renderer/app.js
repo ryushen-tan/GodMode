@@ -872,7 +872,10 @@ generate3dBtn.addEventListener('click', async () => {
     const result = await pollThreeDGeneration({
       provider,
       jobId: started.jobId,
-      intervalMs: 5000,
+      // Tighter polling = we notice completion sooner. Meshy's status
+      // endpoint is cheap; this just trims the "done but not yet shown"
+      // tail.
+      intervalMs: 2500,
       timeoutMs: 5 * 60 * 1000,
       onProgress: (job) => {
         resultStatus.textContent = job.status;
