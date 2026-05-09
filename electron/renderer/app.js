@@ -565,13 +565,6 @@ generate3dBtn.addEventListener('click', async () => {
     let finalDisplayUrl;
 
     if (baseImageData) {
-      // Photo + drawings flow:
-      // 1. Diff current canvas vs base to find your strokes
-      // 2. Crop the bbox of those strokes onto a small white-background sketch
-      // 3. Send THAT crop to Bedrock (Stability Control Sketch) with your prompt
-      // 4. Paste the polished result back onto the photo at the same coords
-      // The photo never goes to AWS, so the safety filter stays out of the way
-      // and the prompt drives what gets rendered in the doodle area.
       const currentData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const maskData = computeInpaintMask(baseImageData, currentData);
 
@@ -582,33 +575,74 @@ generate3dBtn.addEventListener('click', async () => {
       }
       const rawBbox = computeMaskBbox(maskData);
       const bbox = padBbox(rawBbox, canvas.width, canvas.height, 24);
-      logLine(`drawing bbox: ${bbox.w}×${bbox.h} at (${bbox.x}, ${bbox.y})`);
 
-      // Build the cropped sketch and ensure it meets Stability's min size
-      const rawSketch = extractDoodleAsSketch(currentData, maskData, bbox);
-      const sketchCanvas = ensureMinImageSize(rawSketch, 256);
-      const sketchFile = await canvasToPngFile(sketchCanvas, 'sketch-crop.png');
-      logLine(`cropped sketch ${sketchFile.size}b (${sketchCanvas.width}×${sketchCanvas.height})`);
+      // ---- Attempt 1: real Stability Inpaint on the full base + mask.
+      // Best result when not filtered: model uses surrounding photo context
+      // to render the prompt naturally inside the masked area.
+      let inpaintResult = null;
+      let inpaintFiltered = false;
+      try {
+        const baseFile = await imageDataToFile(baseImageData, 'base.png');
+        const maskFile = await imageDataToFile(maskData, 'mask.png');
+        logLine(`base ${baseFile.size}b, mask ${maskFile.size}b`);
+        resultPreview.src = URL.createObjectURL(baseFile);
 
-      resultStatus.textContent = 'uploading sketch…';
-      const uploaded = await uploadImage(sketchFile, `${BACKEND_URL}/api/upload-image`);
-      logLine(`uploaded → ${uploaded.imageUrl}`);
+        resultStatus.textContent = 'uploading…';
+        const baseUp = await uploadImage(baseFile, `${BACKEND_URL}/api/upload-image`);
+        const maskUp = await uploadImage(maskFile, `${BACKEND_URL}/api/upload-image`);
 
-      resultStatus.textContent = 'rendering doodle (AWS Bedrock)…';
-      logLine(`calling AWS Bedrock (Control Sketch) with prompt: "${prompt || '(none)'}"`);
-      const enhanced = await generate2D(
-        { imageUrl: uploaded.imageUrl, prompt },
-        `${BACKEND_URL}/api/generate-2d`,
-      );
-      logLine(`rendered → ${enhanced.imageUrl}`);
+        resultStatus.textContent = 'inpainting (AWS Bedrock)…';
+        logLine(`calling Stability Inpaint with prompt: "${prompt || '(none)'}"`);
+        inpaintResult = await generate2D(
+          { imageUrl: baseUp.imageUrl, maskUrl: maskUp.imageUrl, prompt },
+          `${BACKEND_URL}/api/generate-2d`,
+        );
+        logLine(`inpaint ready → ${inpaintResult.imageUrl}`);
+      } catch (err) {
+        const msg = err.message || String(err);
+        // Backend returns 502 with "safety filter" when Stability rejects input
+        inpaintFiltered = /safety filter|filter/i.test(msg);
+        if (!inpaintFiltered) throw err;
+        logLine('⚠ Stability filter blocked the photo — switching to crop+sketch fallback');
+      }
 
-      resultStatus.textContent = 'compositing…';
-      logLine('pasting rendered crop back onto photo…');
-      finalDisplayUrl = await compositeBaseWithRenderedCrop(
-        baseImageData,
-        enhanced.imageUrl,
-        bbox,
-      );
+      if (inpaintResult) {
+        // True inpaint: composite to guarantee photo stays exact outside mask
+        // (in practice it already does, this is a safety belt).
+        resultStatus.textContent = 'compositing…';
+        finalDisplayUrl = await compositeBaseAndModelOutput(
+          baseImageData,
+          maskData,
+          inpaintResult.imageUrl,
+        );
+      } else {
+        // ---- Attempt 2: crop the doodle onto white, run Control Sketch, paste back.
+        // Photo never leaves the renderer, so the safety filter is bypassed.
+        // Looks more "stamped" than real inpaint but at least follows the prompt.
+        logLine(`drawing bbox: ${bbox.w}×${bbox.h} at (${bbox.x}, ${bbox.y})`);
+        const rawSketch = extractDoodleAsSketch(currentData, maskData, bbox);
+        const sketchCanvas = ensureMinImageSize(rawSketch, 256);
+        const sketchFile = await canvasToPngFile(sketchCanvas, 'sketch-crop.png');
+        logLine(`cropped sketch ${sketchFile.size}b (${sketchCanvas.width}×${sketchCanvas.height})`);
+
+        resultStatus.textContent = 'uploading sketch crop…';
+        const uploaded = await uploadImage(sketchFile, `${BACKEND_URL}/api/upload-image`);
+
+        resultStatus.textContent = 'rendering doodle (AWS Bedrock)…';
+        logLine(`calling Stability Control Sketch with prompt: "${prompt || '(none)'}"`);
+        const enhanced = await generate2D(
+          { imageUrl: uploaded.imageUrl, prompt },
+          `${BACKEND_URL}/api/generate-2d`,
+        );
+        logLine(`rendered → ${enhanced.imageUrl}`);
+
+        resultStatus.textContent = 'compositing…';
+        finalDisplayUrl = await compositeBaseWithRenderedCrop(
+          baseImageData,
+          enhanced.imageUrl,
+          bbox,
+        );
+      }
     } else {
       // No base image — full-canvas sketch flow
       const file = await exportCanvasToFile(canvas, 'sketch.png');

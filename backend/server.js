@@ -218,43 +218,21 @@ app.post('/api/generate-2d', async (req, res) => {
   }
 
   try {
-    let { b64, json } = await invokeAndExtract(effectiveModelId, body);
-    let usedFallback = null;
-
-    // If Stability's safety filter blocked the image, fall back to
-    // control-structure on the full canvas (no mask, more permissive).
-    if (!b64 && useInpaint) {
-      const reasons = (json && json.finish_reasons) || [];
-      const filtered = reasons.some((r) => /filter/i.test(String(r)));
-      if (filtered) {
-        console.warn('[generate-2d] inpaint filtered, falling back to control-structure');
-        usedFallback = 'us.stability.stable-image-control-structure-v1:0';
-        const fallbackBody = {
-          prompt: text,
-          image: inputB64,
-          control_strength: 0.85,
-          output_format: 'png',
-          seed: Math.floor(Math.random() * 1_000_000),
-        };
-        const r2 = await invokeAndExtract(usedFallback, fallbackBody);
-        b64 = r2.b64;
-        json = r2.json;
-      }
-    }
+    const { b64, json } = await invokeAndExtract(effectiveModelId, body);
 
     if (!b64) {
       const reasons = (json && json.finish_reasons) || [];
       const filtered = reasons.some((r) => /filter/i.test(String(r)));
       return res.status(502).json({
-        error: filtered
-          ? "AWS Bedrock's safety filter rejected the image. Try a screenshot without faces, text, or branded UI — or draw on a blank canvas."
-          : 'bedrock returned no image',
+        error: filtered ? 'safety filter rejected input' : 'bedrock returned no image',
+        filtered,
+        finishReasons: reasons,
         detail: json,
       });
     }
     const buf = Buffer.from(b64, 'base64');
     const newId = storeImage(buf, 'image/png');
-    res.json({ imageUrl: publicImageUrl(newId), id: newId, usedFallback });
+    res.json({ imageUrl: publicImageUrl(newId), id: newId });
   } catch (err) {
     console.error('[generate-2d] bedrock error:', err);
     res.status(500).json({ error: err.message || String(err), name: err.name });
