@@ -393,11 +393,119 @@ function maskHasContent(maskImageData) {
   return false;
 }
 
+// Smallest axis-aligned bounding box around mask pixels (white = on).
+function computeMaskBbox(maskData) {
+  const w = maskData.width;
+  const h = maskData.height;
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (maskData.data[(y * w + x) * 4] > 128) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+
+function padBbox(bbox, canvasW, canvasH, pad) {
+  const x = Math.max(0, bbox.x - pad);
+  const y = Math.max(0, bbox.y - pad);
+  const w = Math.min(canvasW - x, bbox.w + pad * 2);
+  const h = Math.min(canvasH - y, bbox.h + pad * 2);
+  return { x, y, w, h };
+}
+
+// Build a small canvas containing JUST the doodle on white background,
+// at the bbox dimensions. This is the "sketch" we send to control-sketch.
+function extractDoodleAsSketch(currentData, maskData, bbox) {
+  const out = document.createElement('canvas');
+  out.width = bbox.w;
+  out.height = bbox.h;
+  const octx = out.getContext('2d');
+  octx.fillStyle = '#ffffff';
+  octx.fillRect(0, 0, bbox.w, bbox.h);
+  const sketch = octx.createImageData(bbox.w, bbox.h);
+  const cw = currentData.width;
+  for (let yy = 0; yy < bbox.h; yy++) {
+    for (let xx = 0; xx < bbox.w; xx++) {
+      const srcIdx = ((bbox.y + yy) * cw + (bbox.x + xx)) * 4;
+      const dstIdx = (yy * bbox.w + xx) * 4;
+      const m = maskData.data[srcIdx];
+      if (m > 128) {
+        sketch.data[dstIdx]     = currentData.data[srcIdx];
+        sketch.data[dstIdx + 1] = currentData.data[srcIdx + 1];
+        sketch.data[dstIdx + 2] = currentData.data[srcIdx + 2];
+      } else {
+        sketch.data[dstIdx]     = 255;
+        sketch.data[dstIdx + 1] = 255;
+        sketch.data[dstIdx + 2] = 255;
+      }
+      sketch.data[dstIdx + 3] = 255;
+    }
+  }
+  octx.putImageData(sketch, 0, 0);
+  return out;
+}
+
+// Stability requires images >= 64px in each dim AND >= 4096 total pixels.
+// Pad/upscale a small canvas to a safe minimum size.
+function ensureMinImageSize(canvasEl, minDim = 256) {
+  if (canvasEl.width >= minDim && canvasEl.height >= minDim) return canvasEl;
+  const ratio = canvasEl.width / canvasEl.height;
+  const newW = Math.max(minDim, Math.round(minDim * Math.max(1, ratio)));
+  const newH = Math.max(minDim, Math.round(minDim / Math.max(1, ratio)));
+  const out = document.createElement('canvas');
+  out.width = newW;
+  out.height = newH;
+  const octx = out.getContext('2d');
+  octx.imageSmoothingEnabled = false;
+  octx.fillStyle = '#ffffff';
+  octx.fillRect(0, 0, newW, newH);
+  // Center the small canvas inside the larger white one
+  const ox = Math.floor((newW - canvasEl.width) / 2);
+  const oy = Math.floor((newH - canvasEl.height) / 2);
+  octx.drawImage(canvasEl, ox, oy);
+  return out;
+}
+
+async function canvasToPngFile(canvasEl, filename) {
+  return new Promise((resolve) => {
+    canvasEl.toBlob((blob) => {
+      resolve(new File([blob], filename, { type: 'image/png' }));
+    }, 'image/png');
+  });
+}
+
+// Composite: draw base everywhere, then draw the rendered crop into the bbox.
+async function compositeBaseWithRenderedCrop(baseData, modelOutputUrl, bbox) {
+  const modelImg = await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = modelOutputUrl;
+  });
+  const w = baseData.width;
+  const h = baseData.height;
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = h;
+  const octx = out.getContext('2d');
+  octx.putImageData(baseData, 0, 0);
+  // Stretch the model output back onto the bbox region.
+  octx.drawImage(modelImg, bbox.x, bbox.y, bbox.w, bbox.h);
+  return new Promise((resolve) => {
+    out.toBlob((blob) => resolve(URL.createObjectURL(blob)), 'image/png');
+  });
+}
+
 // Composite the model's polished output onto the base image, only inside the
-// mask region. Result: base photo is pixel-perfect outside doodles; inside
-// doodles, the model's rendered version is used. Works even when the backend
-// silently fell back from inpaint to control-structure (which regenerates the
-// whole image) — this restores the photo outside the mask.
+// mask region. Used when no bbox/crop is in play (kept for compatibility).
 async function compositeBaseAndModelOutput(baseData, maskData, modelOutputUrl) {
   const modelImg = await new Promise((resolve, reject) => {
     const img = new Image();
@@ -454,11 +562,16 @@ generate3dBtn.addEventListener('click', async () => {
   const prompt = document.getElementById('prompt-input').value.trim() || undefined;
 
   try {
-    let imageUrlForBackend;
-    let maskUrlForBackend;
-    let maskDataForCompositing = null;
+    let finalDisplayUrl;
 
     if (baseImageData) {
+      // Photo + drawings flow:
+      // 1. Diff current canvas vs base to find your strokes
+      // 2. Crop the bbox of those strokes onto a small white-background sketch
+      // 3. Send THAT crop to Bedrock (Stability Control Sketch) with your prompt
+      // 4. Paste the polished result back onto the photo at the same coords
+      // The photo never goes to AWS, so the safety filter stays out of the way
+      // and the prompt drives what gets rendered in the doodle area.
       const currentData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const maskData = computeInpaintMask(baseImageData, currentData);
 
@@ -467,24 +580,37 @@ generate3dBtn.addEventListener('click', async () => {
         resultStatus.textContent = 'idle';
         return;
       }
-      maskDataForCompositing = maskData;
+      const rawBbox = computeMaskBbox(maskData);
+      const bbox = padBbox(rawBbox, canvas.width, canvas.height, 24);
+      logLine(`drawing bbox: ${bbox.w}×${bbox.h} at (${bbox.x}, ${bbox.y})`);
 
-      const baseFile = await imageDataToFile(baseImageData, 'base.png');
-      const maskFile = await imageDataToFile(maskData, 'mask.png');
-      logLine(`base ${baseFile.size}b, mask ${maskFile.size}b`);
-      resultPreview.src = URL.createObjectURL(baseFile);
+      // Build the cropped sketch and ensure it meets Stability's min size
+      const rawSketch = extractDoodleAsSketch(currentData, maskData, bbox);
+      const sketchCanvas = ensureMinImageSize(rawSketch, 256);
+      const sketchFile = await canvasToPngFile(sketchCanvas, 'sketch-crop.png');
+      logLine(`cropped sketch ${sketchFile.size}b (${sketchCanvas.width}×${sketchCanvas.height})`);
 
-      resultStatus.textContent = 'uploading…';
-      const baseUp = await uploadImage(baseFile, `${BACKEND_URL}/api/upload-image`);
-      const maskUp = await uploadImage(maskFile, `${BACKEND_URL}/api/upload-image`);
-      logLine(`base → ${baseUp.imageUrl}`);
-      logLine(`mask → ${maskUp.imageUrl}`);
-      imageUrlForBackend = baseUp.imageUrl;
-      maskUrlForBackend = maskUp.imageUrl;
+      resultStatus.textContent = 'uploading sketch…';
+      const uploaded = await uploadImage(sketchFile, `${BACKEND_URL}/api/upload-image`);
+      logLine(`uploaded → ${uploaded.imageUrl}`);
 
-      resultStatus.textContent = 'inpainting (AWS Bedrock)…';
-      logLine('calling AWS Bedrock (Stability Inpaint, mask-only regeneration)…');
+      resultStatus.textContent = 'rendering doodle (AWS Bedrock)…';
+      logLine(`calling AWS Bedrock (Control Sketch) with prompt: "${prompt || '(none)'}"`);
+      const enhanced = await generate2D(
+        { imageUrl: uploaded.imageUrl, prompt },
+        `${BACKEND_URL}/api/generate-2d`,
+      );
+      logLine(`rendered → ${enhanced.imageUrl}`);
+
+      resultStatus.textContent = 'compositing…';
+      logLine('pasting rendered crop back onto photo…');
+      finalDisplayUrl = await compositeBaseWithRenderedCrop(
+        baseImageData,
+        enhanced.imageUrl,
+        bbox,
+      );
     } else {
+      // No base image — full-canvas sketch flow
       const file = await exportCanvasToFile(canvas, 'sketch.png');
       logLine(`exported ${file.name} (${file.size} bytes)`);
       resultPreview.src = URL.createObjectURL(file);
@@ -492,43 +618,24 @@ generate3dBtn.addEventListener('click', async () => {
       resultStatus.textContent = 'uploading…';
       const uploaded = await uploadImage(file, `${BACKEND_URL}/api/upload-image`);
       logLine(`uploaded → ${uploaded.imageUrl}`);
-      imageUrlForBackend = uploaded.imageUrl;
 
       resultStatus.textContent = 'generating 2D (AWS Bedrock)…';
-      logLine('calling AWS Bedrock (Stability Control, structure-preserving)…');
-    }
-
-    const enhanced = await generate2D(
-      {
-        imageUrl: imageUrlForBackend,
-        ...(maskUrlForBackend ? { maskUrl: maskUrlForBackend } : {}),
-        prompt,
-      },
-      `${BACKEND_URL}/api/generate-2d`,
-    );
-    if (enhanced.usedFallback) {
-      logLine(`⚠ inpaint blocked by safety filter — fell back to ${enhanced.usedFallback}`);
-    }
-    logLine(`2D ready → ${enhanced.imageUrl}`);
-
-    // If we have a base+mask, composite locally so the photo stays
-    // pixel-perfect outside doodles even when the backend fell back.
-    let finalDisplayUrl = enhanced.imageUrl;
-    if (baseImageData && maskDataForCompositing) {
-      logLine('compositing base + model output (preserving photo outside drawings)…');
-      finalDisplayUrl = await compositeBaseAndModelOutput(
-        baseImageData,
-        maskDataForCompositing,
-        enhanced.imageUrl,
+      logLine('calling AWS Bedrock (Stability Control Sketch)…');
+      const enhanced = await generate2D(
+        { imageUrl: uploaded.imageUrl, prompt },
+        `${BACKEND_URL}/api/generate-2d`,
       );
+      logLine(`2D ready → ${enhanced.imageUrl}`);
+      finalDisplayUrl = enhanced.imageUrl;
     }
+
     resultPreview.src = finalDisplayUrl;
 
     // 4. Start 3D job (currently mocked on the backend)
     resultStatus.textContent = 'starting 3D…';
     const provider = new BackendThreeDProvider({ baseUrl: BACKEND_URL });
     const started = await provider.startGeneration({
-      imageUrl: enhanced.imageUrl,
+      imageUrl: finalDisplayUrl,
       prompt,
       mode: 'object',
     });
