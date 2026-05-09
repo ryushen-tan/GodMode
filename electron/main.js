@@ -242,7 +242,6 @@ function createWindow() {
     const dbPath = args?.dbPath;
     const embeddingModel =
       args?.embeddingModel || process.env.COHERE_EMBED_MODEL || "embed-v4.0";
-    // NOTE: indexSprites is not imported in this file. Assuming it's meant to be imported or handled elsewhere.
     if (typeof indexSprites === 'function') {
       return await indexSprites({ spritesRoot, dbPath, embeddingModel });
     } else {
@@ -258,7 +257,6 @@ function createWindow() {
       args?.embeddingModel || process.env.COHERE_EMBED_MODEL || "embed-v4.0";
     if (!imageBase64) throw new Error("assets:search: imageBase64 is required");
     const buf = Buffer.from(imageBase64, "base64");
-    // NOTE: searchAsset is not imported in this file. Assuming it's meant to be imported or handled elsewhere.
     if (typeof searchAsset === 'function') {
       return await searchAsset({ imageBuffer: buf, dbPath, embeddingModel });
     } else {
