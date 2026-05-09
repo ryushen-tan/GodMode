@@ -393,6 +393,56 @@ function maskHasContent(maskImageData) {
   return false;
 }
 
+// Composite the model's polished output onto the base image, only inside the
+// mask region. Result: base photo is pixel-perfect outside doodles; inside
+// doodles, the model's rendered version is used. Works even when the backend
+// silently fell back from inpaint to control-structure (which regenerates the
+// whole image) — this restores the photo outside the mask.
+async function compositeBaseAndModelOutput(baseData, maskData, modelOutputUrl) {
+  const modelImg = await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = modelOutputUrl;
+  });
+
+  const w = baseData.width;
+  const h = baseData.height;
+
+  // Draw model output scaled to base dimensions, then read its pixels
+  const tmp = document.createElement('canvas');
+  tmp.width = w;
+  tmp.height = h;
+  const tctx = tmp.getContext('2d');
+  tctx.drawImage(modelImg, 0, 0, w, h);
+  const modelData = tctx.getImageData(0, 0, w, h);
+
+  // Per-pixel pick: mask=white -> model, mask=black -> base
+  const out = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < baseData.data.length; i += 4) {
+    const m = maskData.data[i]; // 0..255
+    if (m > 128) {
+      out[i]     = modelData.data[i];
+      out[i + 1] = modelData.data[i + 1];
+      out[i + 2] = modelData.data[i + 2];
+    } else {
+      out[i]     = baseData.data[i];
+      out[i + 1] = baseData.data[i + 1];
+      out[i + 2] = baseData.data[i + 2];
+    }
+    out[i + 3] = 255;
+  }
+
+  const final = document.createElement('canvas');
+  final.width = w;
+  final.height = h;
+  final.getContext('2d').putImageData(new ImageData(out, w, h), 0, 0);
+  return new Promise((resolve) => {
+    final.toBlob((blob) => resolve(URL.createObjectURL(blob)), 'image/png');
+  });
+}
+
 generate3dBtn.addEventListener('click', async () => {
   generate3dBtn.disabled = true;
   resultBox.style.display = 'block';
@@ -406,20 +456,18 @@ generate3dBtn.addEventListener('click', async () => {
   try {
     let imageUrlForBackend;
     let maskUrlForBackend;
+    let maskDataForCompositing = null;
 
     if (baseImageData) {
-      // Inpaint mode: send the unmodified base image + a mask of just the
-      // pixels you drew. Stability Inpaint regenerates only inside the mask
-      // and leaves the rest of the photo pixel-perfect.
       const currentData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const maskData = computeInpaintMask(baseImageData, currentData);
 
       if (!maskHasContent(maskData)) {
-        // Nothing was drawn on top of the base — nothing to inpaint
         logLine('no strokes detected on top of the uploaded image. Draw something first.');
         resultStatus.textContent = 'idle';
         return;
       }
+      maskDataForCompositing = maskData;
 
       const baseFile = await imageDataToFile(baseImageData, 'base.png');
       const maskFile = await imageDataToFile(maskData, 'mask.png');
@@ -437,7 +485,6 @@ generate3dBtn.addEventListener('click', async () => {
       resultStatus.textContent = 'inpainting (AWS Bedrock)…';
       logLine('calling AWS Bedrock (Stability Inpaint, mask-only regeneration)…');
     } else {
-      // No base image uploaded — fall back to the regular control-model flow
       const file = await exportCanvasToFile(canvas, 'sketch.png');
       logLine(`exported ${file.name} (${file.size} bytes)`);
       resultPreview.src = URL.createObjectURL(file);
@@ -463,7 +510,19 @@ generate3dBtn.addEventListener('click', async () => {
       logLine(`⚠ inpaint blocked by safety filter — fell back to ${enhanced.usedFallback}`);
     }
     logLine(`2D ready → ${enhanced.imageUrl}`);
-    resultPreview.src = enhanced.imageUrl;
+
+    // If we have a base+mask, composite locally so the photo stays
+    // pixel-perfect outside doodles even when the backend fell back.
+    let finalDisplayUrl = enhanced.imageUrl;
+    if (baseImageData && maskDataForCompositing) {
+      logLine('compositing base + model output (preserving photo outside drawings)…');
+      finalDisplayUrl = await compositeBaseAndModelOutput(
+        baseImageData,
+        maskDataForCompositing,
+        enhanced.imageUrl,
+      );
+    }
+    resultPreview.src = finalDisplayUrl;
 
     // 4. Start 3D job (currently mocked on the backend)
     resultStatus.textContent = 'starting 3D…';
