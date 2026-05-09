@@ -481,8 +481,12 @@ async function canvasToPngFile(canvasEl, filename) {
   });
 }
 
-// Composite: draw base everywhere, then draw the rendered crop into the bbox.
-async function compositeBaseWithRenderedCrop(baseData, modelOutputUrl, bbox) {
+// Composite the rendered crop onto the base photo with FEATHERED alpha so
+// the crop blends instead of looking pasted as a rectangle.
+//   - Center of the bbox: full opacity (rendered content wins)
+//   - Near the bbox edges: alpha fades to 0 (photo wins)
+// `feather` = pixels of edge fade. Larger = softer blend.
+async function compositeBaseWithRenderedCrop(baseData, modelOutputUrl, bbox, feather = 24) {
   const modelImg = await new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -492,15 +496,41 @@ async function compositeBaseWithRenderedCrop(baseData, modelOutputUrl, bbox) {
   });
   const w = baseData.width;
   const h = baseData.height;
-  const out = document.createElement('canvas');
-  out.width = w;
-  out.height = h;
-  const octx = out.getContext('2d');
-  octx.putImageData(baseData, 0, 0);
-  // Stretch the model output back onto the bbox region.
-  octx.drawImage(modelImg, bbox.x, bbox.y, bbox.w, bbox.h);
+
+  // Render the model output onto a full-canvas overlay positioned at bbox.
+  const overlay = document.createElement('canvas');
+  overlay.width = w;
+  overlay.height = h;
+  const ovctx = overlay.getContext('2d');
+  ovctx.drawImage(modelImg, bbox.x, bbox.y, bbox.w, bbox.h);
+  const overlayData = ovctx.getImageData(0, 0, w, h);
+
+  // Build a feathered alpha map: 1.0 inside the bbox (away from edges),
+  // 0..1 within `feather` pixels of any bbox edge, 0 outside the bbox.
+  const out = new Uint8ClampedArray(w * h * 4);
+  const x0 = bbox.x, y0 = bbox.y, x1 = bbox.x + bbox.w - 1, y1 = bbox.y + bbox.h - 1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      let alpha = 0;
+      if (x >= x0 && x <= x1 && y >= y0 && y <= y1) {
+        const dEdge = Math.min(x - x0, x1 - x, y - y0, y1 - y);
+        alpha = Math.min(1, dEdge / feather);
+      }
+      const inv = 1 - alpha;
+      out[i]     = Math.round(baseData.data[i]     * inv + overlayData.data[i]     * alpha);
+      out[i + 1] = Math.round(baseData.data[i + 1] * inv + overlayData.data[i + 1] * alpha);
+      out[i + 2] = Math.round(baseData.data[i + 2] * inv + overlayData.data[i + 2] * alpha);
+      out[i + 3] = 255;
+    }
+  }
+
+  const final = document.createElement('canvas');
+  final.width = w;
+  final.height = h;
+  final.getContext('2d').putImageData(new ImageData(out, w, h), 0, 0);
   return new Promise((resolve) => {
-    out.toBlob((blob) => resolve(URL.createObjectURL(blob)), 'image/png');
+    final.toBlob((blob) => resolve(URL.createObjectURL(blob)), 'image/png');
   });
 }
 
