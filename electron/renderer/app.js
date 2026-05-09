@@ -1,5 +1,12 @@
-const addButton = document.getElementById('add-button');
-const panel = document.getElementById('panel');
+const addButton       = document.getElementById('add-button');
+const panel           = document.getElementById('panel');
+const statusDot       = document.getElementById('status-dot');
+const promptInput     = document.getElementById('prompt-input');
+const submitBtn       = document.getElementById('submit-prompt-btn');
+const submitLabel     = document.getElementById('submit-label');
+const agentLog        = document.getElementById('agent-log');
+const agentSteps      = document.getElementById('agent-steps');
+const agentResult     = document.getElementById('agent-result');
 const closePanelBtn = document.getElementById('close-panel-btn');
 const canvas = document.getElementById('sketch-canvas');
 const ctx = canvas.getContext('2d');
@@ -60,13 +67,73 @@ function togglePanel() {
 addButton.addEventListener('click', togglePanel);
 closePanelBtn.addEventListener('click', togglePanel);
 
-if (window.electronAPI && window.electronAPI.onClosePanel) {
+if (window.electronAPI) {
   window.electronAPI.onClosePanel(() => {
-    if (panel.classList.contains('visible')) {
-      togglePanel();
-    }
+    if (panel.classList.contains('visible')) togglePanel();
   });
+
+  window.electronAPI.onGodotStatus((status) => {
+    statusDot.className = `status-dot ${status}`;
+  });
+
+  window.electronAPI.onAgentStep((step) => {
+    agentLog.style.display = 'block';
+    const el = document.createElement('div');
+    el.className = 'step-item';
+    
+    if (step.type === 'tool_call') {
+      const argsStr = Object.entries(step.args || {})
+        .map(([k, v]) => `${k}=${JSON.stringify(String(v).slice(0, 60))}`)
+        .join(', ');
+      el.innerHTML = `<span class="step-tool">${step.tool}</span>(${argsStr})`;
+    } else if (step.type === 'tool_result') {
+      const preview = String(step.output || '').slice(0, 100).replace(/\n/g, ' ');
+      el.innerHTML = `<span class="step-result">→ ${preview}${step.output?.length > 100 ? '…' : ''}</span>`;
+    } else if (step.type === 'thinking') {
+      el.className = 'step-item thinking';
+      el.innerHTML = `<span class="step-thinking">💭 ${step.text}</span>`;
+    } else if (step.type === 'error') {
+      el.className = 'step-item error';
+      el.innerHTML = `<span class="step-error">⚠️ ${step.text}</span>`;
+    }
+    
+    agentSteps.appendChild(el);
+    agentLog.scrollTop = agentLog.scrollHeight;
+  });
+
 }
+
+submitBtn.addEventListener('click', async () => {
+  const prompt = promptInput.value.trim();
+  if (!prompt) return;
+
+  // Reset UI
+  agentLog.style.display = 'none';
+  agentSteps.innerHTML = '';
+  agentResult.style.display = 'none';
+  agentResult.className = 'agent-result';
+
+  submitBtn.disabled = true;
+  submitLabel.textContent = 'Running…';
+
+  try {
+    const result = await window.electronAPI.sendPrompt(prompt);
+
+    agentResult.style.display = 'block';
+    let html = `<strong>Done:</strong> ${result.content}`;
+    if (result.filesChanged && result.filesChanged.length > 0) {
+      html += `<div class="files-changed">Files modified:<br>${result.filesChanged.map(f => `• ${f}`).join('<br>')}</div>`;
+    }
+    agentResult.innerHTML = html;
+  } catch (err) {
+    agentResult.style.display = 'block';
+    agentResult.className = 'agent-result error';
+    agentResult.textContent = `Error: ${err.message}`;
+  } finally {
+    submitBtn.disabled = false;
+    submitLabel.textContent = 'Run Agent';
+  }
+});
 
 penTool.addEventListener('click', () => {
   currentTool = 'pen';

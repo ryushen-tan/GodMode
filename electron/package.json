@@ -7,7 +7,12 @@
     "start": "electron .",
     "dev": "electron . --dev"
   },
-  "keywords": ["electron", "overlay", "canvas", "sketch"],
+  "keywords": [
+    "electron",
+    "overlay",
+    "canvas",
+    "sketch"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
@@ -17,5 +22,9 @@
     "sqlite3": "^5.1.7",
     "sqlite-vec": "^0.1.7",
     "electron": "^28.0.0"
+  },
+  "dependencies": {
+    "backboard-sdk": "^1.5.14",
+    "dotenv": "^17.4.2"
   }
 }

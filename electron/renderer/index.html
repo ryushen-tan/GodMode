@@ -8,6 +8,7 @@
 </head>
 <body>
   <div id="add-button">
+    <span id="status-dot" class="status-dot waiting"></span>
     <span class="add-label">Add</span>
   </div>
 
@@ -56,8 +57,18 @@
 
     <div class="prompt-section">
       <label for="prompt-input">Prompt:</label>
-      <textarea id="prompt-input" placeholder="Enter your prompt here..." rows="4"></textarea>
+      <textarea id="prompt-input" placeholder="e.g. Make the player move faster, add a double jump, change gravity..." rows="4"></textarea>
+      <button id="submit-prompt-btn" class="submit-btn">
+        <span id="submit-label">Run Agent</span>
+      </button>
     </div>
+
+    <div id="agent-log" class="agent-log" style="display:none;">
+      <div class="agent-log-header">Agent Activity</div>
+      <div id="agent-steps"></div>
+    </div>
+
+    <div id="agent-result" class="agent-result" style="display:none;"></div>
 
     <div class="upload-section">
       <input id="sprites-path" type="text" placeholder="Sprites folder path (e.g. .../godot-FirstPersonStarter-main/sprites)" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ddd;">
