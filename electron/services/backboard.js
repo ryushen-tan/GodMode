@@ -19,7 +19,16 @@ Rules:
 - You can modify .gd (scripts) OR .tscn (scenes) files
 - For scene files (.tscn): modify existing nodes, don't remove essential elements
 - For adding walls/ramps/objects: modify the appropriate scene file (e.g., Levels/Main/L_Main.tscn)
-- ALL 3D models/sprites (like Avocado, Duck, Fox, WaterBottle) are located in "res://sprites/". e.g., "res://sprites/Avocado.glb"
+- ALL 3D models/sprites are in "res://sprites/". The user's prompt will contain the EXACT filename (e.g., "res://sprites/ARedApple-a58a.glb"). Use the EXACT path provided - do NOT change or simplify the filename.
+- When adding a new 3D model (.glb file) to a scene, you MUST follow this pattern:
+  1. Add [ext_resource type="PackedScene" uid="uid://unique_id" path="res://sprites/EXACT_FILENAME.glb" id="X_shortname"]
+     CRITICAL: type MUST be "PackedScene" (NOT "GLTF"), .glb files are imported as PackedScene in Godot
+  2. Add [node name="ObjectName" parent="." unique_id=NNNNNN instance=ExtResource("X_shortname")]
+     CRITICAL: Use "instance=ExtResource(...)" NOT "mesh=ExtResource(...)"
+  3. Use the EXACT sprite path from the user's prompt
+  Example:
+    [ext_resource type="PackedScene" uid="uid://car_res" path="res://sprites/ACar-b757.glb" id="7_car"]
+    [node name="Car" parent="." unique_id=123456 instance=ExtResource("7_car")]
 - Always write the COMPLETE file content, preserving existing code that should stay. DO NOT truncate. DO NOT use "...". You must output the entire file from top to bottom.
 - Only change what the user asks for
 - Maintain existing code style and structure
@@ -67,6 +76,22 @@ async function runAgent(prompt, apiKey, threadId, onStep) {
       const allFiles = listFiles();
       onStep && onStep({ type: 'tool_result', tool: 'list_files', output: allFiles.slice(0, 200) });
 
+      // Step 1.5: List available sprites (including newly generated meshes)
+      const fs = require('fs');
+      const path = require('path');
+      // electron/services/backboard.js -> go up to electron/ -> up to root -> into example_game
+      const spritesDir = path.join(__dirname, '..', '..', 'example_game', 'godot-FirstPersonStarter-main', 'sprites');
+      let availableSprites = [];
+      try {
+        availableSprites = fs.readdirSync(spritesDir)
+          .filter(f => f.toLowerCase().endsWith('.glb'))
+          .map(f => `res://sprites/${f}`);
+        console.log(`[GodMode] Found ${availableSprites.length} sprites in ${spritesDir}`);
+      } catch (err) {
+        console.error('[GodMode] Could not list sprites:', err.message);
+        console.error('[GodMode] Tried path:', spritesDir);
+      }
+
       // Step 2: Grep for relevant files based on prompt keywords
       const keywords = extractKeywords(prompt);
       const relevantFiles = new Set();
@@ -108,7 +133,11 @@ async function runAgent(prompt, apiKey, threadId, onStep) {
         .map(([p, c]) => `=== ${p} ===\n${c}`)
         .join('\n\n');
 
-      let fullPrompt = `All project files:\n${allFiles}\n\nRelevant file contents:\n${fileSection}\n\nUser request: ${prompt}`;
+      const spritesSection = availableSprites.length > 0
+        ? `\n\nAvailable 3D models in sprites folder:\n${availableSprites.join('\n')}`
+        : '';
+
+      let fullPrompt = `All project files:\n${allFiles}${spritesSection}\n\nRelevant file contents:\n${fileSection}\n\nUser request: ${prompt}`;
       
       // Add error context if retrying
       if (lastError) {

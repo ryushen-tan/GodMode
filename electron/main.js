@@ -128,13 +128,13 @@ function findRunningGodotInfo() {
   }
 }
 
-function restartGodot() {
+function restartGodot(delayMs = 500) {
   // If we launched Godot ourselves
   if (godotProcess) {
     console.log('[GodMode] Restarting Godot (managed process)...');
     godotProcess.kill();
     godotProcess = null;
-    setTimeout(launchGodot, 500);
+    setTimeout(launchGodot, delayMs);
     return;
   }
 
@@ -149,7 +149,7 @@ function restartGodot() {
       setTimeout(() => {
         console.log(`[GodMode] Relaunching Godot from: ${info.binaryPath}`);
         exec(`"${info.binaryPath}" --path "${GAME_PROJECT_PATH}" &`);
-      }, 500);
+      }, delayMs);
     } catch (err) {
       console.error('[GodMode] Failed to restart external Godot:', err.message);
     }
@@ -223,6 +223,7 @@ function createWindow() {
     movable: false,
     minimizable: false,
     maximizable: false,
+    icon: path.join(__dirname, 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -311,6 +312,14 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Override the default Electron dock icon (macOS) with our logo.
+  if (process.platform === 'darwin' && app.dock && app.dock.setIcon) {
+    try {
+      app.dock.setIcon(path.join(__dirname, 'icon.png'));
+    } catch (err) {
+      console.warn('[GodMode] failed to set dock icon:', err.message);
+    }
+  }
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
