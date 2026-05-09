@@ -534,10 +534,11 @@ function maskHasContent(maskImageData) {
   return false;
 }
 
-// Stable Fast 3D rejects images smaller than 640px on either axis.
-// Upscale a backend-served image to >= minSize, upload the result,
-// return the new backend URL.
-async function ensureImageMinSize(imageUrl, minSize = 640) {
+// Pre-process an image for Stable Fast 3D:
+//  1. Ensure >= minSize on each axis (Stability rejects smaller).
+//  2. Apply a subtle blur to suppress pixel-level noise that the model
+//     would otherwise turn into bumpy geometry/textures on the output mesh.
+async function ensureImageMinSize(imageUrl, minSize = 640, blurPx = 1.5) {
   const img = await new Promise((resolve, reject) => {
     const im = new Image();
     im.crossOrigin = 'anonymous';
@@ -545,21 +546,29 @@ async function ensureImageMinSize(imageUrl, minSize = 640) {
     im.onerror = reject;
     im.src = imageUrl;
   });
-  if (img.width >= minSize && img.height >= minSize) return imageUrl;
 
-  const scale = Math.max(minSize / img.width, minSize / img.height);
-  const w = Math.ceil(img.width * scale);
-  const h = Math.ceil(img.height * scale);
+  // Compute target dims (only upscale if needed)
+  let w = img.width;
+  let h = img.height;
+  if (w < minSize || h < minSize) {
+    const scale = Math.max(minSize / w, minSize / h);
+    w = Math.ceil(w * scale);
+    h = Math.ceil(h * scale);
+  }
+
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
   const cx = c.getContext('2d');
   cx.imageSmoothingEnabled = true;
   cx.imageSmoothingQuality = 'high';
+  // Slight blur smooths out single-pixel noise from the AI inpaint that
+  // Stable Fast 3D would otherwise reproduce as bumpy 3D surface detail.
+  cx.filter = `blur(${blurPx}px)`;
   cx.drawImage(img, 0, 0, w, h);
 
   const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
-  const file = new File([blob], 'upscaled.png', { type: 'image/png' });
+  const file = new File([blob], 'prepped.png', { type: 'image/png' });
   const uploaded = await uploadImage(file, `${BACKEND_URL}/api/upload-image`);
   return uploaded.imageUrl;
 }
@@ -957,11 +966,10 @@ generate3dBtn.addEventListener('click', async () => {
       // Single synchronous call to backend → Stability Stable Fast 3D.
       // Typical turnaround: 3–5 seconds end-to-end.
       resultStatus.textContent = 'preparing image…';
-      // Stable Fast 3D requires >=640px; canvas is 400px so upscale first.
-      const upscaledUrl = await ensureImageMinSize(lastTwoDResult.imageUrlFor3D, 640);
-      if (upscaledUrl !== lastTwoDResult.imageUrlFor3D) {
-        logLine('upscaled image to 640+ for Stable Fast 3D');
-      }
+      // Subtle blur + size floor before Stable Fast 3D — smooths surface
+      // noise the model would otherwise reproduce as bumpy geometry.
+      const upscaledUrl = await ensureImageMinSize(lastTwoDResult.imageUrlFor3D, 640, 1.5);
+      logLine('prepped image (smoothing + size floor) for Stable Fast 3D');
 
       resultStatus.textContent = 'generating 3D (Stable Fast 3D)…';
       logLine('calling Stability Stable Fast 3D…');
