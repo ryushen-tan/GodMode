@@ -6,6 +6,9 @@
 [ext_resource type="PackedScene" uid="uid://cdn7d5mxwdyks" path="res://Levels/Main/Geometry/Wall.tscn" id="3_jw8hm"]
 [ext_resource type="Material" uid="uid://sofvlrq3jmka" path="res://Levels/Main/Materials/M_Dark.tres" id="4_m7xar"]
 [ext_resource type="PackedScene" uid="uid://cvjkq7pd86jww" path="res://sprites/Avocado.glb" id="5_avocado"]
+[ext_resource type="PackedScene" uid="uid://bvxn3y5y25bno" path="res://sprites/Duck.glb" id="6_duck"]
+[ext_resource type="PackedScene" uid="uid://bycjq3y34bhjh" path="res://sprites/Fox.glb" id="7_fox"]
+[ext_resource type="PackedScene" uid="uid://c7lbolv1v1cd3" path="res://sprites/WaterBottle.glb" id="8_waterbottle"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_egctf"]
 size = Vector3(8, 4, 4)
@@ -70,22 +73,23 @@ ambient_light_sky_contribution = 0.9
 tonemap_mode = 2
 glow_enabled = true
 
-[sub_resource type="BoxShape3D" id="BoxShape3D_avocado"]
-size = Vector3(1, 1, 1)
-
 [node name="L_Main" type="Node3D" unique_id=127289839]
 script = ExtResource("1_km1jj")
 
 [node name="Player" parent="." unique_id=77986780 instance=ExtResource("1_qgept")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
 
-[node name="Avocado" parent="." instance=ExtResource("5_avocado")]
+[node name="Avocado" parent="." unique_id=1810179457 instance=ExtResource("5_avocado")]
 transform = Transform3D(10, 0, 0, 0, 10, 0, 0, 0, 10, 0, 2, -2)
 
-[node name="AvocadoBody" type="StaticBody3D" parent="Avocado"]
+[node name="Duck" parent="." instance=ExtResource("6_duck")]
+transform = Transform3D(3, 0, 0, 0, 3, 0, 0, 0, 3, 2, 2, 0)
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="Avocado/AvocadoBody"]
-shape = SubResource("BoxShape3D_avocado")
+[node name="Fox" parent="." instance=ExtResource("7_fox")]
+transform = Transform3D(3, 0, 0, 0, 3, 0, 0, 0, 3, -2, 2, 0)
+
+[node name="WaterBottle" parent="." instance=ExtResource("8_waterbottle")]
+transform = Transform3D(3, 0, 0, 0, 3, 0, 0, 0, 3, 0, 2, 2)
 
 [node name="ArenaGeometry" type="Node3D" parent="." unique_id=1696368159]
 
