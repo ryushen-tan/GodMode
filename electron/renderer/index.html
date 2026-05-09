@@ -23,7 +23,7 @@
     </div>
 
     <div class="canvas-container">
-      <canvas id="sketch-canvas" width="400" height="400"></canvas>
+      <canvas id="sketch-canvas" width="1024" height="1024"></canvas>
       
       <div class="toolbar">
         <button id="pen-tool" class="tool-btn active" title="Pen">
@@ -44,8 +44,8 @@
         
         <div class="brush-size-container">
           <label for="brush-size" title="Brush Size">Size:</label>
-          <input type="range" id="brush-size" min="1" max="20" value="3">
-          <span id="brush-size-value">3</span>
+          <input type="range" id="brush-size" min="1" max="60" value="8">
+          <span id="brush-size-value">8</span>
         </div>
         
         <div class="divider"></div>
@@ -141,7 +141,7 @@
     reveal="auto"
     interaction-prompt="none"
     disable-zoom disable-pan disable-tap
-    style="position: fixed; left: -9999px; top: 0; width: 768px; height: 768px; pointer-events: none; opacity: 0;">
+    style="position: fixed; left: -9999px; top: 0; width: 1024px; height: 1024px; pointer-events: none; opacity: 0;">
   </model-viewer>
 
   <script type="module" src="app.js"></script>

@@ -52,7 +52,7 @@ async function searchFromBase64DataUrl(dataUrl) {
 let isDrawing = false;
 let currentTool = 'pen';
 let currentColor = '#000000';
-let currentBrushSize = 3;
+let currentBrushSize = 8;
 let lastX = 0;
 let lastY = 0;
 
