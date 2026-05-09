@@ -40,6 +40,18 @@ async function searchFromBase64DataUrl(dataUrl) {
   if (!matchResult) return;
   if (res && res.match && res.match.path) {
     matchResult.textContent = `Match (${res.method}): ${res.match.path}`;
+    // Auto-select the matched GLB in the Generate 3D base-model dropdown
+    // so merge mode just works when the user uploaded a screenshot of one
+    // of our known sprites.
+    const filename = res.match.path.split('/').pop();
+    if (filename && typeof spriteSelect !== 'undefined' && spriteSelect) {
+      for (const opt of Array.from(spriteSelect.options)) {
+        if (opt.value === filename) {
+          spriteSelect.value = filename;
+          break;
+        }
+      }
+    }
   } else {
     matchResult.textContent = 'No match found.';
   }
