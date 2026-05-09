@@ -7,7 +7,7 @@ class_name MovementController
 @export var acceleration := 8
 @export var deceleration := 10
 @export_range(0.0, 1.0, 0.05) var air_control := 0.3
-@export var jump_height := 30  # Increased jump height for maximum possible jump
+@export var jump_height := 40  # Increased jump height even further for higher jumps
 var direction := Vector3()
 var input_axis := Vector2()
 # Get the gravity from the project settings to be synced with RigidDynamicBody nodes.

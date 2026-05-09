@@ -15,7 +15,6 @@
     "@gltf-transform/functions": "^4.3.0",
     "axios": "^1.16.0",
     "cloudinary": "^2.10.0",
-    "composio": "^1.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "draco3dgltf": "^1.5.7",

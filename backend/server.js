@@ -66,8 +66,8 @@ const REPLICATE_TRIPOSR_VERSION = 'e0d3fe8abce3ba86497ea3530d9eae59af7b2231b6c82
 const { initializeCyStack } = require('./security/cystack-integration');
 const cystack = initializeCyStack();
 
-// Composio Twitter Integration
-const { getComposioService } = require('./services/composio-twitter');
+// Composio Reddit Integration
+const { getComposioService } = require('./services/composio-reddit');
 const composio = getComposioService();
 
 tick(`config (port=${PORT}, region=${REGION})`);
@@ -141,49 +141,50 @@ app.get('/api/cystack/telemetry', (_req, res) => {
 });
 
 // ============================================================================
-// Composio Twitter Integration Endpoints
+// Composio Reddit Integration Endpoints
 // ============================================================================
 
-// Check Twitter connection status
-app.get('/api/twitter/status', async (_req, res) => {
+// Check Reddit connection status
+app.get('/api/reddit/status', async (_req, res) => {
   try {
     await composio.initialize();
     const status = await composio.checkConnection();
     res.json(status);
   } catch (err) {
-    console.error('[twitter/status] error:', err);
+    console.error('[reddit/status] error:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Get Twitter OAuth connection URL
-app.get('/api/twitter/connect', async (_req, res) => {
+// Get Reddit OAuth connection URL
+app.get('/api/reddit/connect', async (_req, res) => {
   try {
     await composio.initialize();
     const { url, connectionId } = await composio.getConnectionUrl();
     res.json({ url, connectionId });
   } catch (err) {
-    console.error('[twitter/connect] error:', err);
+    console.error('[reddit/connect] error:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Post screenshot to Twitter
-app.post('/api/twitter/post', upload.single('screenshot'), async (req, res) => {
+// Post screenshot to Reddit
+app.post('/api/reddit/post', upload.single('screenshot'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No screenshot provided' });
     }
 
-    const text = req.body.text || 'Check out my game! Made with #GodMode 🎮';
+    const title = req.body.title || 'Check out my game! Made with GodMode 🎮';
+    const subreddit = req.body.subreddit || 'SOONHackathonTesting';
     const imageBuffer = req.file.buffer;
 
     await composio.initialize();
-    const result = await composio.postTweet(text, imageBuffer);
+    const result = await composio.postToReddit(title, subreddit, imageBuffer);
 
     res.json(result);
   } catch (err) {
-    console.error('[twitter/post] error:', err);
+    console.error('[reddit/post] error:', err);
     res.status(500).json({ error: err.message });
   }
 });

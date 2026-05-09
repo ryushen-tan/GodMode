@@ -2,12 +2,54 @@ const { listFiles, readFile, writeFile, grepFiles, checkGodotErrors } = require(
 
 const BACKBOARD_API = 'https://app.backboard.io/api';
 
-const SYSTEM_PROMPT = `You are GodMode — an expert Godot 4 game development agent.
+// Reddit posting function (called from main.js with screenshot data)
+async function postToReddit(title, subreddit, screenshotBase64) {
+  try {
+    if (!screenshotBase64) {
+      throw new Error('No screenshot provided');
+    }
+
+    // Convert base64 to buffer
+    const base64Data = screenshotBase64.replace(/^data:image\/png;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    // Create form data
+    const formData = new FormData();
+    formData.append('screenshot', new Blob([buffer], { type: 'image/png' }), 'game-screenshot.png');
+    formData.append('title', title);
+    formData.append('subreddit', subreddit);
+
+    const response = await fetch('http://localhost:3001/api/reddit/post', {
+      method: 'POST',
+      body: formData
+    });
+    const result = await response.json();
+    if (response.ok) {
+      return {
+        success: true,
+        url: result.url,
+        postId: result.postId
+      };
+    }
+
+    return {
+      success: false,
+      error: result.error || 'Failed to post to Reddit'
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message
+    };
+  }
+}
+
+const SYSTEM_PROMPT = `You are GodMode — an expert Godot 4 game development agent with Reddit posting capabilities.
 
 CRITICAL: Your response MUST be ONLY valid JSON. No text before or after. No markdown. No code fences.
 CRITICAL: DO NOT use any tools or functions (like read_file or edit_file). You already have all necessary file contents in the prompt. You must output the final JSON directly in your response.
 
-Required JSON format:
+Required JSON format (for code changes):
 {
   "file": "relative/path/to/file.gd or .tscn",
   "content": "complete file content here",
@@ -15,7 +57,20 @@ Required JSON format:
   "thinking": "your reasoning process"
 }
 
-Rules:
+OR for Reddit posts:
+{
+  "action": "post_to_reddit",
+  "title": "Post title here",
+  "subreddit": "gamedev",
+  "summary": "Posted screenshot to Reddit",
+  "thinking": "your reasoning"
+}
+
+Special Actions:
+- To post a screenshot to Reddit: Return {"action": "post_to_reddit", "title": "...", "subreddit": "gamedev", "summary": "...", "thinking": "..."}
+- User can say things like "post a screenshot to reddit" or "share this on r/gamedev"
+
+Rules for Code Changes:
 - You can modify .gd (scripts) OR .tscn (scenes) files
 - For scene files (.tscn): modify existing nodes, don't remove essential elements
 - For adding walls/ramps/objects: modify the appropriate scene file (e.g., Levels/Main/L_Main.tscn)
@@ -60,7 +115,7 @@ function extractKeywords(prompt) {
   return [...new Set(words.filter(w => !stopWords.has(w)))].slice(0, 5);
 }
 
-async function runAgent(prompt, apiKey, threadId, onStep) {
+async function runAgent(prompt, apiKey, threadId, onStep, captureScreenshot) {
   const MAX_RETRIES = 3;
   let currentThreadId = threadId;
   let lastError = null;
@@ -226,6 +281,46 @@ async function runAgent(prompt, apiKey, threadId, onStep) {
         throw new Error(`LLM returned invalid JSON. Last error: ${lastParseError}. Response preview: ${raw.slice(0, 300)}`);
       }
 
+      // Check if this is a Reddit post action
+      if (parsed.action === 'post_to_reddit') {
+        if (!parsed.title || !parsed.subreddit) {
+          throw new Error('Reddit post requires title and subreddit');
+        }
+
+        if (!captureScreenshot) {
+          throw new Error('Screenshot capture function not available');
+        }
+
+        // Show thinking if provided
+        if (parsed.thinking) {
+          onStep && onStep({ type: 'thinking', text: parsed.thinking });
+        }
+
+        // Capture screenshot via callback
+        onStep && onStep({ type: 'tool_call', tool: 'capture_screenshot', args: {} });
+        const screenshot = await captureScreenshot();
+        if (!screenshot) {
+          throw new Error('Failed to capture screenshot');
+        }
+        onStep && onStep({ type: 'tool_result', tool: 'capture_screenshot', output: '✓ Screenshot captured' });
+
+        // Post to Reddit
+        onStep && onStep({ type: 'tool_call', tool: 'post_to_reddit', args: { title: parsed.title, subreddit: parsed.subreddit } });
+        const redditResult = await postToReddit(parsed.title, parsed.subreddit, screenshot);
+        
+        if (redditResult.success) {
+          onStep && onStep({ type: 'tool_result', tool: 'post_to_reddit', output: `✓ Posted to r/${parsed.subreddit}: ${redditResult.url}` });
+          return {
+            content: parsed.summary || `Posted screenshot to r/${parsed.subreddit}`,
+            thread_id: currentThreadId,
+            redditUrl: redditResult.url,
+          };
+        } else {
+          throw new Error(`Failed to post to Reddit: ${redditResult.error}`);
+        }
+      }
+
+      // Standard file modification flow
       if (!parsed.file || !parsed.content) {
         throw new Error(`LLM response missing required fields: ${JSON.stringify(parsed).slice(0, 200)}`);
       }

@@ -79,17 +79,17 @@ addButton.addEventListener('click', togglePanel);
 closePanelBtn.addEventListener('click', togglePanel);
 
 // ============================================================================
-// Export to X (Twitter) Functionality
+// Export to Reddit Functionality
 // ============================================================================
 
-const exportToXBtn = document.getElementById('export-to-x-btn');
+const exportToRedditBtn = document.getElementById('export-to-reddit-btn');
 
-exportToXBtn.addEventListener('click', async () => {
-  if (exportToXBtn.classList.contains('posting')) return;
+exportToRedditBtn.addEventListener('click', async () => {
+  if (exportToRedditBtn.classList.contains('posting')) return;
 
   try {
-    exportToXBtn.classList.add('posting');
-    exportToXBtn.title = 'Capturing screenshot...';
+    exportToRedditBtn.classList.add('posting');
+    exportToRedditBtn.title = 'Capturing screenshot...';
 
     // Request screenshot from Electron main process
     const screenshot = await window.electronAPI.captureGameWindow();
@@ -99,35 +99,39 @@ exportToXBtn.addEventListener('click', async () => {
       return;
     }
 
-    // Convert base64 to blob
-    const base64Data = screenshot.replace(/^data:image\/png;base64,/, '');
-    const byteCharacters = atob(base64Data);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    const blob = new Blob([byteArray], { type: 'image/png' });
+    const blob = await (await fetch(screenshot)).blob();
 
-    // Prompt for tweet text
-    const tweetText = prompt(
-      'Tweet text:',
-      'Check out my game! Made with #GodMode 🎮'
+    // Prompt for post title
+    const postTitle = prompt(
+      'Post title:',
+      'Check out my game! Made with GodMode 🎮'
     );
 
-    if (tweetText === null) {
+    if (postTitle === null) {
       // User cancelled
       return;
     }
 
-    exportToXBtn.title = 'Posting to X...';
+    // Prompt for subreddit
+    const subreddit = prompt(
+      'Subreddit (without r/):',
+      'SOONHackathonTesting'
+    );
+
+    if (subreddit === null) {
+      // User cancelled
+      return;
+    }
+
+    exportToRedditBtn.title = 'Posting to Reddit...';
 
     // Send to backend
     const formData = new FormData();
     formData.append('screenshot', blob, 'game-screenshot.png');
-    formData.append('text', tweetText);
+    formData.append('title', postTitle);
+    formData.append('subreddit', subreddit);
 
-    const response = await fetch(`${BACKEND_URL}/api/twitter/post`, {
+    const response = await fetch(`${BACKEND_URL}/api/reddit/post`, {
       method: 'POST',
       body: formData,
     });
@@ -135,26 +139,26 @@ exportToXBtn.addEventListener('click', async () => {
     const result = await response.json();
 
     if (!response.ok) {
-      throw new Error(result.error || 'Failed to post to X');
+      throw new Error(result.error || 'Failed to post to Reddit');
     }
 
     // Show success
-    alert(`✅ Posted to X!\n\nView at: ${result.url || 'Twitter'}`);
-    exportToXBtn.title = 'Posted successfully!';
+    alert(`✅ Posted to r/${subreddit}!\n\nView at: ${result.url || 'Reddit'}`);
+    exportToRedditBtn.title = 'Posted successfully!';
     
-    // Open tweet in browser
+    // Open post in browser
     if (result.url && window.electronAPI.openExternal) {
       window.electronAPI.openExternal(result.url);
     }
 
   } catch (err) {
-    console.error('[Export to X] Error:', err);
-    alert(`Failed to post to X: ${err.message}`);
-    exportToXBtn.title = 'Export screenshot to X (Twitter)';
+    console.error('[Export to Reddit] Error:', err);
+    alert(`Failed to post to Reddit: ${err.message}`);
+    exportToRedditBtn.title = 'Export screenshot to Reddit';
   } finally {
-    exportToXBtn.classList.remove('posting');
+    exportToRedditBtn.classList.remove('posting');
     setTimeout(() => {
-      exportToXBtn.title = 'Export screenshot to X (Twitter)';
+      exportToRedditBtn.title = 'Export screenshot to Reddit';
     }, 3000);
   }
 });
@@ -213,10 +217,24 @@ submitBtn.addEventListener('click', async () => {
 
     agentResult.style.display = 'block';
     let html = `<strong>Done:</strong> ${result.content}`;
+    
     if (result.filesChanged && result.filesChanged.length > 0) {
       html += `<div class="files-changed">Files modified:<br>${result.filesChanged.map(f => `• ${f}`).join('<br>')}</div>`;
     }
     agentResult.innerHTML = html;
+    if (result.redditUrl) {
+      const redditLinkBox = document.createElement('div');
+      redditLinkBox.className = 'reddit-link';
+      const redditLink = document.createElement('a');
+      redditLink.href = '#';
+      redditLink.textContent = 'View on Reddit →';
+      redditLink.addEventListener('click', (event) => {
+        event.preventDefault();
+        window.electronAPI.openExternal(result.redditUrl);
+      });
+      redditLinkBox.appendChild(redditLink);
+      agentResult.appendChild(redditLinkBox);
+    }
   } catch (err) {
     agentResult.style.display = 'block';
     agentResult.className = 'agent-result error';

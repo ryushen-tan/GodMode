@@ -14,16 +14,16 @@ body {
   pointer-events: auto;
 }
 
-/* Export to X Button */
-.export-x-btn {
+/* Export to Reddit Button */
+.export-reddit-btn {
   position: fixed;
   top: 20px;
   right: 96px;
   width: 50px;
   height: 50px;
   border-radius: 50%;
-  background: #000000;
-  border: 2px solid #1DA1F2;
+  background: #FF4500;
+  border: 2px solid #FF5722;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -33,23 +33,23 @@ body {
   color: #ffffff;
 }
 
-.export-x-btn:hover {
-  background: #1DA1F2;
+.export-reddit-btn:hover {
+  background: #FF5722;
   transform: scale(1.1);
-  box-shadow: 0 4px 12px rgba(29, 161, 242, 0.4);
+  box-shadow: 0 4px 12px rgba(255, 69, 0, 0.4);
 }
 
-.export-x-btn:active {
+.export-reddit-btn:active {
   transform: scale(0.95);
 }
 
-.export-x-btn.posting {
+.export-reddit-btn.posting {
   opacity: 0.6;
   cursor: not-allowed;
-  animation: pulse-x 1.5s infinite;
+  animation: pulse-reddit 1.5s infinite;
 }
 
-@keyframes pulse-x {
+@keyframes pulse-reddit {
   0%, 100% { opacity: 0.6; }
   50% { opacity: 0.8; }
 }
@@ -632,3 +632,26 @@ body {
 }
 .result-log > div { padding: 1px 0; }
 .result-model a { color: #67e8f9; word-break: break-all; font-size: 12px; }
+
+/* Reddit link in agent results */
+.reddit-link {
+  margin-top: 12px;
+  padding: 10px;
+  background: rgba(255, 69, 0, 0.1);
+  border: 1px solid rgba(255, 69, 0, 0.3);
+  border-radius: 6px;
+}
+
+.reddit-link a {
+  color: #FF4500;
+  text-decoration: none;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reddit-link a:hover {
+  color: #FF5722;
+  text-decoration: underline;
+}
