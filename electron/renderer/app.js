@@ -352,9 +352,9 @@ function startSyntheticProgress(cap = 90) {
   let pct = 0;
   resultProgressFill.style.width = '0%';
   progressTimer = setInterval(() => {
-    pct += (cap - pct) * 0.06;
+    pct += (cap - pct) * 0.025;
     resultProgressFill.style.width = pct.toFixed(1) + '%';
-  }, 120);
+  }, 150);
 }
 function stopSyntheticProgress() {
   if (progressTimer) {
