@@ -691,6 +691,11 @@ app.post('/api/3d/stable-fast', async (req, res) => {
   try {
     const form = new FormData();
     form.append('image', new Blob([stored.buffer], { type: stored.mime || 'image/png' }), 'input.png');
+    // Quality knobs — Stability defaults are conservative.
+    form.append('texture_resolution', '2048');     // 2x sharper UVs
+    form.append('vertex_count', '20000');          // way more geometry detail
+    form.append('remesh', 'triangle');             // clean topology
+    form.append('foreground_ratio', '1.3');        // tighter crop around subject
 
     const stRes = await fetch(STABILITY_FAST_3D_URL, {
       method: 'POST',
