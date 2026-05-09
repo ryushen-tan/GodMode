@@ -223,6 +223,7 @@ function createWindow() {
     movable: false,
     minimizable: false,
     maximizable: false,
+    icon: path.join(__dirname, 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -311,6 +312,14 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Override the default Electron dock icon (macOS) with our logo.
+  if (process.platform === 'darwin' && app.dock && app.dock.setIcon) {
+    try {
+      app.dock.setIcon(path.join(__dirname, 'icon.png'));
+    } catch (err) {
+      console.warn('[GodMode] failed to set dock icon:', err.message);
+    }
+  }
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
