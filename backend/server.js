@@ -20,6 +20,8 @@ const crypto = require('crypto');
 const express = require('express'); tick('express');
 const cors = require('cors'); tick('cors');
 const multer = require('multer'); tick('multer');
+const axios = require('axios'); tick('axios');
+const FormDataNode = require('form-data'); tick('form-data');
 const {
   BedrockRuntimeClient,
   InvokeModelCommand,
@@ -680,7 +682,7 @@ const mergedGlbs = new Map(); // id -> Buffer
 // Stable Fast 3D: single synchronous call, ~3-5 second turnaround.
 // Returns the GLB URL directly (no polling, no jobId machinery).
 app.post('/api/3d/stable-fast', async (req, res) => {
-  const { imageUrl, baseSprite } = req.body || {};
+  const { imageUrl, baseSprite, prompt } = req.body || {};
   if (!imageUrl) return res.status(400).json({ error: 'imageUrl required' });
   if (!STABILITY_API_KEY) {
     return res.status(500).json({ error: 'STABILITY_API_KEY missing in .env' });
@@ -693,27 +695,33 @@ app.post('/api/3d/stable-fast', async (req, res) => {
 
   const startedAt = Date.now();
   try {
-    const form = new FormData();
-    form.append('image', new Blob([stored.buffer], { type: stored.mime || 'image/png' }), 'input.png');
+    const form = new FormDataNode();
+    form.append('image', stored.buffer, { filename: 'input.png', contentType: stored.mime || 'image/png' });
     // Quality knobs — Stability defaults are conservative.
     form.append('texture_resolution', '2048');     // 2x sharper UVs
     form.append('vertex_count', '20000');          // way more geometry detail
     form.append('remesh', 'triangle');             // clean topology
     form.append('foreground_ratio', '0.85');       // valid range is 0-1
 
-    const stRes = await fetch(STABILITY_FAST_3D_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${STABILITY_API_KEY}`,
-        Accept: 'model/gltf-binary',
-      },
-      body: form,
-    });
-    if (!stRes.ok) {
-      const text = await stRes.text().catch(() => '');
-      return res.status(502).json({ error: `Stability ${stRes.status}`, detail: text });
+    let glbBuf;
+    try {
+      const stRes = await axios.post(STABILITY_FAST_3D_URL, form, {
+        headers: {
+          Authorization: `Bearer ${STABILITY_API_KEY}`,
+          Accept: 'model/gltf-binary',
+          ...form.getHeaders()
+        },
+        responseType: 'arraybuffer'
+      });
+      glbBuf = Buffer.from(stRes.data);
+    } catch (err) {
+      const status = err.response?.status || 502;
+      let detail = err.message;
+      if (err.response?.data) {
+        detail = Buffer.isBuffer(err.response.data) ? err.response.data.toString() : err.response.data;
+      }
+      return res.status(status).json({ error: `Stability ${status}`, detail });
     }
-    let glbBuf = Buffer.from(await stRes.arrayBuffer());
 
     // Optional: rescale to base sprite dimensions
     if (baseSprite) {
@@ -727,8 +735,19 @@ app.post('/api/3d/stable-fast', async (req, res) => {
       }
     }
 
-    const outId = `sf3d-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+    let namePrefix = 'sf3d';
+    if (prompt && typeof prompt === 'string') {
+      const sanitized = prompt.replace(/[^a-zA-Z0-9]/g, ' ').trim().split(/\s+/).slice(0, 4).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('');
+      if (sanitized) namePrefix = sanitized;
+    }
+    const outId = `${namePrefix}-${crypto.randomBytes(2).toString('hex')}`;
     mergedGlbs.set(outId, glbBuf);
+
+    // Save directly to the game's sprites folder so the agent can use it immediately
+    const spritePath = path.join(SPRITES_DIR, `${outId}.glb`);
+    fs.writeFileSync(spritePath, glbBuf);
+    console.log(`[stable-fast] Saved new sprite to: ${spritePath}`);
+
     const elapsedMs = Date.now() - startedAt;
     console.log(`[stable-fast] ${elapsedMs}ms, ${glbBuf.length} bytes`);
     res.json({
@@ -746,7 +765,7 @@ app.post('/api/3d/stable-fast', async (req, res) => {
 // from scripts/triposr_server.py). Sync POST, returns GLB in 3-8s after
 // the model is warm.
 app.post('/api/3d/triposr', async (req, res) => {
-  const { imageUrl, baseSprite } = req.body || {};
+  const { imageUrl, baseSprite, prompt } = req.body || {};
   if (!imageUrl) return res.status(400).json({ error: 'imageUrl required' });
   if (!TRIPOSR_URL) return res.status(500).json({ error: 'TRIPOSR_URL missing in .env' });
 
@@ -781,8 +800,19 @@ app.post('/api/3d/triposr', async (req, res) => {
       }
     }
 
-    const outId = `triposr-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+    let namePrefix = 'triposr';
+    if (prompt && typeof prompt === 'string') {
+      const sanitized = prompt.replace(/[^a-zA-Z0-9]/g, ' ').trim().split(/\s+/).slice(0, 4).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join('');
+      if (sanitized) namePrefix = sanitized;
+    }
+    const outId = `${namePrefix}-${crypto.randomBytes(2).toString('hex')}`;
     mergedGlbs.set(outId, glbBuf);
+
+    // Save directly to the game's sprites folder so the agent can use it immediately
+    const spritePath = path.join(SPRITES_DIR, `${outId}.glb`);
+    fs.writeFileSync(spritePath, glbBuf);
+    console.log(`[triposr] Saved new sprite to: ${spritePath}`);
+
     const elapsedMs = Date.now() - startedAt;
     const remoteMs = tsRes.headers.get('x-triposr-elapsed-ms');
     console.log(`[triposr] total ${elapsedMs}ms (model ${remoteMs || '?'}ms), ${glbBuf.length} bytes`);

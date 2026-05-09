@@ -995,6 +995,7 @@ generate3dBtn.addEventListener('click', async () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           imageUrl: preppedUrl,
+          prompt: lastTwoDResult.prompt,
           ...(baseSprite ? { baseSprite } : {}),
         }),
       });
