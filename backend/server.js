@@ -734,10 +734,14 @@ app.post('/api/3d/stable-fast', async (req, res) => {
 });
 
 app.get('/merged/:id', (req, res) => {
-  const buf = mergedGlbs.get(req.params.id);
+  // The URL ends in `.glb` for nicer download UX; strip it for the lookup.
+  const id = String(req.params.id).replace(/\.glb$/i, '');
+  const buf = mergedGlbs.get(id);
   if (!buf) return res.status(404).end();
   res.setHeader('Content-Type', 'model/gltf-binary');
-  res.setHeader('Content-Disposition', `attachment; filename="${req.params.id}.glb"`);
+  // Inline so <model-viewer> can render it; the renderer's anchor uses the
+  // `download` attribute when the user wants to save.
+  res.setHeader('Cache-Control', 'no-store');
   res.end(buf);
 });
 
