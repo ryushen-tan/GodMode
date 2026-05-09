@@ -32,6 +32,10 @@ const {
   ListInferenceProfilesCommand,
 } = require('@aws-sdk/client-bedrock'); tick('bedrock-control');
 const fs = require('fs');
+const sharp = require('sharp');
+const { renderGlbToPng } = require('./render_glb_preview');
+const { uploadGenerated3DAsset } = require('./cloudinary_upload');
+const { sendSmsViaPingram } = require('./pingram_sms');
 const { NodeIO } = require('@gltf-transform/core'); tick('gltf-transform/core');
 const { ALL_EXTENSIONS } = require('@gltf-transform/extensions'); tick('gltf-transform/extensions');
 const { bounds } = require('@gltf-transform/functions'); tick('gltf-transform/functions');
@@ -95,6 +99,19 @@ function imageIdFromUrl(url) {
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, region: REGION, model: MODEL_ID });
+});
+
+app.post('/api/sms/test', async (req, res) => {
+  const { message } = req.body || {};
+  if (!message || typeof message !== 'string') {
+    return res.status(400).json({ error: 'message string required' });
+  }
+  try {
+    const out = await sendSmsViaPingram({ message });
+    res.json({ ok: true, result: out || null });
+  } catch (e) {
+    res.status(502).json({ ok: false, error: e.message || String(e) });
+  }
 });
 
 // Available base GLBs from example_game/sprites/. The renderer's dropdown
@@ -740,6 +757,69 @@ app.post('/api/3d/start', async (req, res) => {
 
 // Persist merged/scaled GLBs in memory; serve via /merged/<id>.glb.
 const mergedGlbs = new Map(); // id -> Buffer
+const mergedPreviews = new Map(); // id -> PNG Buffer
+
+async function generatePlaceholderPreviewPng(glbBuffer) {
+  // Server-side GLB rendering is non-trivial (needs WebGL/headless GPU).
+  // For now, generate a deterministic placeholder preview so the UI has
+  // something to show and Cloudinary uploads can proceed.
+  const size = 512;
+  const hash = crypto.createHash('sha256').update(glbBuffer).digest('hex');
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">` +
+    `<rect width="100%" height="100%" fill="#0b1020"/>` +
+    `<text x="50%" y="45%" dominant-baseline="middle" text-anchor="middle" fill="#ffffff" font-family="Arial" font-size="28">GLB Preview</text>` +
+    `<text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" fill="#9aa4b2" font-family="Menlo,monospace" font-size="16">${hash.slice(0, 16)}</text>` +
+    `</svg>`;
+  return await sharp(Buffer.from(svg)).png().toBuffer();
+}
+
+async function generateRealPreviewPngForId(outId, glbBuffer) {
+  // Render from the in-memory /merged/<id>.glb URL so the loader can fetch it.
+  // Ensure the GLB is available first.
+  mergedGlbs.set(outId, glbBuffer);
+  const url = `${baseUrl()}/merged/${outId}.glb`;
+  return await renderGlbToPng({ glbPathOrUrl: url, size: 512 });
+}
+
+async function attachCloudinaryLinks(outId, glbBuf) {
+  const preview = mergedPreviews.get(outId);
+  if (!preview) return null;
+  try {
+    return await uploadGenerated3DAsset({
+      id: outId,
+      glbBuffer: glbBuf,
+      previewPngBuffer: preview,
+    });
+  } catch (e) {
+    console.warn(`[cloudinary] upload failed for ${outId}:`, e.message);
+    return null;
+  }
+}
+
+function format3dReadySms({ cloudinaryGlbUrl, cloudinaryPreviewUrl }) {
+  return [
+    "Your 3D model is ready.",
+    "",
+    "GLB (Cloudinary CDN):",
+    cloudinaryGlbUrl,
+    "",
+    "Preview image (Cloudinary CDN):",
+    cloudinaryPreviewUrl,
+  ].join("\n");
+}
+
+async function maybeSendSmsWithCloudinaryLinks(cloud) {
+  if (!cloud?.cloudinaryGlbUrl || !cloud?.cloudinaryPreviewUrl) return;
+  const msg = format3dReadySms(cloud);
+  try {
+    await sendSmsViaPingram({ message: msg });
+  } catch (e) {
+    console.warn("[pingram] SMS send failed:", e && e.message ? e.message : e);
+  }
+}
+
+const publicPreviewUrl = (id) => `${baseUrl()}/previews/${id}.png`;
 
 // Stable Fast 3D: single synchronous call, ~3-5 second turnaround.
 // Returns the GLB URL directly (no polling, no jobId machinery).
@@ -846,6 +926,14 @@ app.post('/api/3d/stable-fast', async (req, res) => {
     }
     const outId = `${namePrefix}-${crypto.randomBytes(2).toString('hex')}`;
     mergedGlbs.set(outId, glbBuf);
+    try {
+      mergedPreviews.set(outId, await generateRealPreviewPngForId(outId, glbBuf));
+    } catch (e) {
+      console.warn('[stable-fast] real preview failed, falling back:', e.message);
+      try { mergedPreviews.set(outId, await generatePlaceholderPreviewPng(glbBuf)); } catch {}
+    }
+    const cloud = await attachCloudinaryLinks(outId, glbBuf);
+    await maybeSendSmsWithCloudinaryLinks(cloud);
 
     // Save directly to the game's sprites folder so the agent can use it immediately
     const spritePath = path.join(SPRITES_DIR, `${outId}.glb`);
@@ -856,6 +944,8 @@ app.post('/api/3d/stable-fast', async (req, res) => {
     console.log(`[stable-fast] ${elapsedMs}ms, ${glbBuf.length} bytes`);
     res.json({
       modelUrl: `${baseUrl()}/merged/${outId}.glb`,
+      previewImageUrl: publicPreviewUrl(outId),
+      ...(cloud ? cloud : {}),
       elapsedMs,
       format: 'glb',
     });
@@ -911,6 +1001,14 @@ app.post('/api/3d/triposr', async (req, res) => {
     }
     const outId = `${namePrefix}-${crypto.randomBytes(2).toString('hex')}`;
     mergedGlbs.set(outId, glbBuf);
+    try {
+      mergedPreviews.set(outId, await generateRealPreviewPngForId(outId, glbBuf));
+    } catch (e) {
+      console.warn('[triposr] real preview failed, falling back:', e.message);
+      try { mergedPreviews.set(outId, await generatePlaceholderPreviewPng(glbBuf)); } catch {}
+    }
+    const cloud = await attachCloudinaryLinks(outId, glbBuf);
+    await maybeSendSmsWithCloudinaryLinks(cloud);
 
     // Save directly to the game's sprites folder so the agent can use it immediately
     const spritePath = path.join(SPRITES_DIR, `${outId}.glb`);
@@ -922,6 +1020,8 @@ app.post('/api/3d/triposr', async (req, res) => {
     console.log(`[triposr] total ${elapsedMs}ms (model ${remoteMs || '?'}ms), ${glbBuf.length} bytes`);
     res.json({
       modelUrl: `${baseUrl()}/merged/${outId}.glb`,
+      previewImageUrl: publicPreviewUrl(outId),
+      ...(cloud ? cloud : {}),
       elapsedMs,
       format: 'glb',
     });
@@ -1005,6 +1105,16 @@ app.post('/api/3d/replicate-triposr', async (req, res) => {
 
     const outId = `rep-tsr-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
     mergedGlbs.set(outId, glbBuf);
+    try {
+      mergedPreviews.set(outId, await generateRealPreviewPngForId(outId, glbBuf));
+    } catch (e) {
+      console.warn('[replicate-triposr] real preview failed, falling back:', e.message);
+      try { mergedPreviews.set(outId, await generatePlaceholderPreviewPng(glbBuf)); } catch {}
+    }
+    const elapsedMs = Date.now() - startedAt;
+    console.log(`[replicate-triposr] ${elapsedMs}ms (Replicate ${prediction.metrics && prediction.metrics.predict_time}s), ${glbBuf.length} bytes`);
+    const cloud = await attachCloudinaryLinks(outId, glbBuf);
+    await maybeSendSmsWithCloudinaryLinks(cloud);
     
     // Save to sprites folder  
     const spritePath = path.join(SPRITES_DIR, `${outId}.glb`);
@@ -1014,6 +1124,8 @@ app.post('/api/3d/replicate-triposr', async (req, res) => {
     console.log(`[replicate-triposr] ${elapsedMs}ms (Replicate ${prediction.metrics && prediction.metrics.predict_time}s), saved to ${spritePath}`);
     res.json({
       modelUrl: `${baseUrl()}/merged/${outId}.glb`,
+      previewImageUrl: publicPreviewUrl(outId),
+      ...(cloud ? cloud : {}),
       elapsedMs,
       format: 'glb',
     });
@@ -1031,6 +1143,15 @@ app.get('/merged/:id', (req, res) => {
   res.setHeader('Content-Type', 'model/gltf-binary');
   // Inline so <model-viewer> can render it; the renderer's anchor uses the
   // `download` attribute when the user wants to save.
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(buf);
+});
+
+app.get('/previews/:id', (req, res) => {
+  const id = String(req.params.id).replace(/\.png$/i, '');
+  const buf = mergedPreviews.get(id);
+  if (!buf) return res.status(404).end();
+  res.setHeader('Content-Type', 'image/png');
   res.setHeader('Cache-Control', 'no-store');
   res.end(buf);
 });
@@ -1072,7 +1193,16 @@ app.get('/api/3d/status/:jobId', async (req, res) => {
             const scaled = await scaleGlbToMatchBase(meshyGlb, basePath);
             const scaledId = `scaled-${job.jobId}`;
             mergedGlbs.set(scaledId, scaled);
+            try {
+              mergedPreviews.set(scaledId, await generateRealPreviewPngForId(scaledId, scaled));
+            } catch (e) {
+              console.warn('[3d/status] real preview failed, falling back:', e.message);
+              try { mergedPreviews.set(scaledId, await generatePlaceholderPreviewPng(scaled)); } catch {}
+            }
+            const cloud = await attachCloudinaryLinks(scaledId, scaled);
+            await maybeSendSmsWithCloudinaryLinks(cloud);
             modelUrl = `${baseUrl()}/merged/${scaledId}.glb`;
+            job.cloudinary = cloud;
             console.log(`[3d/status] scaled GLB → ${modelUrl} (${scaled.length} bytes)`);
           } else {
             // Path B: full mesh-merge (kept for future use)
@@ -1080,7 +1210,16 @@ app.get('/api/3d/status/:jobId', async (req, res) => {
             const merged = await mergeGlbs(basePath, meshyGlb, job.featureBbox);
             const mergedId = `merged-${job.jobId}`;
             mergedGlbs.set(mergedId, merged);
+            try {
+              mergedPreviews.set(mergedId, await generateRealPreviewPngForId(mergedId, merged));
+            } catch (e) {
+              console.warn('[3d/status] real preview failed, falling back:', e.message);
+              try { mergedPreviews.set(mergedId, await generatePlaceholderPreviewPng(merged)); } catch {}
+            }
+            const cloud = await attachCloudinaryLinks(mergedId, merged);
+            await maybeSendSmsWithCloudinaryLinks(cloud);
             modelUrl = `${baseUrl()}/merged/${mergedId}.glb`;
+            job.cloudinary = cloud;
             console.log(`[3d/status] merged GLB → ${modelUrl} (${merged.length} bytes)`);
           }
         } catch (err) {
@@ -1099,6 +1238,10 @@ app.get('/api/3d/status/:jobId', async (req, res) => {
       status,
       progress,
       ...(job.lastModelUrl ? { modelUrl: job.lastModelUrl } : {}),
+      ...(job.lastModelUrl
+        ? { previewImageUrl: publicPreviewUrl(String(job.lastModelUrl).split('/').pop().replace(/\.glb$/i, '')) }
+        : {}),
+      ...(job.cloudinary ? job.cloudinary : {}),
       ...(taskError ? { error: taskError } : {}),
     });
   } catch (err) {
