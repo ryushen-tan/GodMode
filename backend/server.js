@@ -1,23 +1,38 @@
+// Loud crash handlers so we never silently exit at startup again.
+process.on('uncaughtException', (err) => {
+  console.error('[backend] UNCAUGHT EXCEPTION:', err && err.stack ? err.stack : err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[backend] UNHANDLED REJECTION:', err && err.stack ? err.stack : err);
+  process.exit(1);
+});
+
+console.log('[backend] starting…');
+
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+console.log('[backend] env loaded');
+
+const tick = (label) => console.log(`[backend] ✓ ${label}`);
 
 const crypto = require('crypto');
-const express = require('express');
-const cors = require('cors');
-const multer = require('multer');
+const express = require('express'); tick('express');
+const cors = require('cors'); tick('cors');
+const multer = require('multer'); tick('multer');
 const {
   BedrockRuntimeClient,
   InvokeModelCommand,
-} = require('@aws-sdk/client-bedrock-runtime');
+} = require('@aws-sdk/client-bedrock-runtime'); tick('bedrock-runtime');
 const {
   BedrockClient,
   ListFoundationModelsCommand,
   ListInferenceProfilesCommand,
-} = require('@aws-sdk/client-bedrock');
+} = require('@aws-sdk/client-bedrock'); tick('bedrock-control');
 const fs = require('fs');
-const { NodeIO } = require('@gltf-transform/core');
-const { ALL_EXTENSIONS } = require('@gltf-transform/extensions');
-const { bounds } = require('@gltf-transform/functions');
+const { NodeIO } = require('@gltf-transform/core'); tick('gltf-transform/core');
+const { ALL_EXTENSIONS } = require('@gltf-transform/extensions'); tick('gltf-transform/extensions');
+const { bounds } = require('@gltf-transform/functions'); tick('gltf-transform/functions');
 // Optional: only used by the 3D mesh-merge / scale post-process. If the
 // dep isn't installed locally we still want the rest of the backend to
 // boot — particularly the 2D pipeline.
@@ -35,12 +50,14 @@ const VISION_MODEL_ID = process.env.BEDROCK_VISION_MODEL_ID || 'us.anthropic.cla
 const MESHY_API_KEY = process.env.MESHY_API_KEY || '';
 const MESHY_BASE = 'https://api.meshy.ai/openapi/v1';
 
-const bedrock = new BedrockRuntimeClient({ region: REGION });
-const bedrockControl = new BedrockClient({ region: REGION });
+tick(`config (port=${PORT}, region=${REGION})`);
+const bedrock = new BedrockRuntimeClient({ region: REGION }); tick('bedrock client');
+const bedrockControl = new BedrockClient({ region: REGION }); tick('bedrock control client');
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '20mb' }));
+tick('express app');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -734,10 +751,19 @@ app.get('/api/3d/status/:jobId', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+tick('routes registered');
+
+const server = app.listen(PORT, () => {
   console.log(`[backend] listening on ${baseUrl()}`);
   console.log(`[backend] region=${REGION} model=${MODEL_ID}`);
   if (!process.env.AWS_ACCESS_KEY_ID) {
     console.warn('[backend] WARNING: AWS_ACCESS_KEY_ID missing from .env');
   }
+});
+server.on('error', (err) => {
+  console.error('[backend] LISTEN FAILED:', err.message);
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[backend] Port ${PORT} is already in use. Free it: lsof -ti:${PORT} | xargs kill -9`);
+  }
+  process.exit(1);
 });
