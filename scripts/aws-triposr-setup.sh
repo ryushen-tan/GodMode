@@ -1,7 +1,12 @@
 #!/bin/bash
-# Bootstrap a fresh g5.xlarge running Ubuntu 22.04 Deep Learning AMI for TripoSR.
-# Run this on the EC2 box (NOT locally). It installs deps, clones TripoSR,
-# downloads the model, and starts the Flask server on :8000.
+# Bootstrap any Ubuntu GPU box for TripoSR + a Cloudflare quick-tunnel
+# that exposes the Flask server to the public internet without any
+# config. Tested on AWS EC2 g5.xlarge (Deep Learning Base AMI) and
+# generic Ubuntu compute servers (CoCalc, Lambda Labs, etc).
+#
+# Run this on the GPU box (NOT locally). The end of the script prints
+# a public https://*.trycloudflare.com URL — paste that into your
+# local .env as TRIPOSR_URL.
 set -e
 
 cd ~
@@ -44,16 +49,63 @@ sleep 2
 
 # Wait until /health returns 200 (model load can take 30-60s on cold start)
 echo "[setup] waiting for /health…"
+HEALTHY=false
 for i in $(seq 1 60); do
   if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-    echo "[setup] ready ✅"
-    curl -s http://localhost:8000/health
-    echo
-    exit 0
+    HEALTHY=true
+    break
   fi
   sleep 2
 done
 
-echo "[setup] timed out waiting for server. Last 20 log lines:"
-tail -20 /tmp/triposr.log
+if [ "$HEALTHY" != "true" ]; then
+  echo "[setup] server didn't come up. Last 20 lines of log:"
+  tail -20 /tmp/triposr.log
+  exit 1
+fi
+
+echo "[setup] flask server ready ✅"
+curl -s http://localhost:8000/health
+echo
+
+# ---- Cloudflare quick-tunnel for public access ----
+# Skips installation if cloudflared already exists. No login or account
+# required — `cloudflared tunnel --url ...` issues a one-time URL.
+if ! command -v cloudflared > /dev/null; then
+  echo "[setup] installing cloudflared…"
+  curl -sSL -o /tmp/cloudflared.deb \
+    https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+  sudo dpkg -i /tmp/cloudflared.deb
+fi
+
+echo "[setup] starting Cloudflare tunnel for http://localhost:8000…"
+pkill -f "cloudflared.*localhost:8000" 2>/dev/null || true
+nohup cloudflared tunnel --no-autoupdate --url http://localhost:8000 \
+  > /tmp/cloudflared.log 2>&1 &
+
+# Tail the log until cloudflared prints its public URL
+echo "[setup] waiting for tunnel URL…"
+for i in $(seq 1 30); do
+  URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cloudflared.log | head -1)
+  if [ -n "$URL" ]; then
+    echo
+    echo "============================================================"
+    echo "  TripoSR tunnel ready ✅"
+    echo
+    echo "  Public URL:  $URL"
+    echo
+    echo "  Set this in your local .env:"
+    echo "    TRIPOSR_URL=$URL"
+    echo "============================================================"
+    echo
+    echo "  Health check:"
+    curl -sS "$URL/health"
+    echo
+    exit 0
+  fi
+  sleep 1
+done
+
+echo "[setup] timed out waiting for tunnel. Last 20 log lines:"
+tail -20 /tmp/cloudflared.log
 exit 1
