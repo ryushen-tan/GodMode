@@ -695,7 +695,7 @@ app.post('/api/3d/stable-fast', async (req, res) => {
     form.append('texture_resolution', '2048');     // 2x sharper UVs
     form.append('vertex_count', '20000');          // way more geometry detail
     form.append('remesh', 'triangle');             // clean topology
-    form.append('foreground_ratio', '1.3');        // tighter crop around subject
+    form.append('foreground_ratio', '0.85');       // valid range is 0-1
 
     const stRes = await fetch(STABILITY_FAST_3D_URL, {
       method: 'POST',
