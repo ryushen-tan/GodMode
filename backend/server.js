@@ -14,6 +14,10 @@ const {
   ListFoundationModelsCommand,
   ListInferenceProfilesCommand,
 } = require('@aws-sdk/client-bedrock');
+const fs = require('fs');
+const { NodeIO } = require('@gltf-transform/core');
+const { ALL_EXTENSIONS } = require('@gltf-transform/extensions');
+const { bounds } = require('@gltf-transform/functions');
 
 const PORT = Number(process.env.BACKEND_PORT || 3001);
 const REGION = process.env.AWS_REGION || 'us-east-1';
@@ -287,6 +291,77 @@ function meshyHeaders() {
   };
 }
 
+// Merge an addition GLB into a base GLB. The addition is translated so its
+// bottom (min.y) sits at the base's top (max.y) plus a small gap, and X/Z
+// centered on the base. Returns the merged GLB as a Buffer.
+async function mergeGlbs(baseGlbPath, additionGlbBuffer) {
+  const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
+  const baseDoc = await io.read(baseGlbPath);
+  const additionDoc = await io.readBinary(additionGlbBuffer);
+
+  const baseBounds = bounds(baseDoc.getRoot().listScenes()[0]);
+  const addBounds = bounds(additionDoc.getRoot().listScenes()[0]);
+
+  // Compute translation so the addition sits on top of the base, centered.
+  const baseCenterXZ = [
+    (baseBounds.min[0] + baseBounds.max[0]) / 2,
+    (baseBounds.min[2] + baseBounds.max[2]) / 2,
+  ];
+  const addCenterXZ = [
+    (addBounds.min[0] + addBounds.max[0]) / 2,
+    (addBounds.min[2] + addBounds.max[2]) / 2,
+  ];
+  const baseSize = [
+    baseBounds.max[0] - baseBounds.min[0],
+    baseBounds.max[1] - baseBounds.min[1],
+    baseBounds.max[2] - baseBounds.min[2],
+  ];
+  const addSize = [
+    addBounds.max[0] - addBounds.min[0],
+    addBounds.max[1] - addBounds.min[1],
+    addBounds.max[2] - addBounds.min[2],
+  ];
+
+  // Scale the addition so its largest dimension is ~25% of the base's largest.
+  const baseMax = Math.max(...baseSize);
+  const addMax = Math.max(...addSize) || 1;
+  const targetScale = (baseMax * 0.25) / addMax;
+
+  // Translation: place addition's min.y at base's max.y + small gap.
+  const gap = baseMax * 0.02;
+  const tx = baseCenterXZ[0] - addCenterXZ[0] * targetScale;
+  const ty = baseBounds.max[1] - addBounds.min[1] * targetScale + gap;
+  const tz = baseCenterXZ[1] - addCenterXZ[1] * targetScale;
+
+  // Wrap the addition's root nodes in a single transformed node.
+  const wrapper = additionDoc.createNode('addition-anchor')
+    .setTranslation([tx, ty, tz])
+    .setScale([targetScale, targetScale, targetScale]);
+
+  for (const scene of additionDoc.getRoot().listScenes()) {
+    for (const node of scene.listChildren()) {
+      scene.removeChild(node);
+      wrapper.addChild(node);
+    }
+    scene.addChild(wrapper);
+  }
+
+  baseDoc.merge(additionDoc);
+
+  // Move all of additionDoc's scenes' children into baseDoc's main scene.
+  const baseScene = baseDoc.getRoot().listScenes()[0];
+  const allScenes = baseDoc.getRoot().listScenes();
+  for (let i = 1; i < allScenes.length; i++) {
+    for (const child of allScenes[i].listChildren()) {
+      allScenes[i].removeChild(child);
+      baseScene.addChild(child);
+    }
+    allScenes[i].dispose();
+  }
+
+  return Buffer.from(await io.writeBinary(baseDoc));
+}
+
 function meshyToJobStatus(meshyStatus) {
   switch (meshyStatus) {
     case 'PENDING':     return 'queued';
@@ -357,6 +432,17 @@ app.post('/api/3d/start', async (req, res) => {
   }
 });
 
+// Persist merged GLBs in memory; serve via /merged/<id>.glb.
+const mergedGlbs = new Map(); // id -> Buffer
+
+app.get('/merged/:id', (req, res) => {
+  const buf = mergedGlbs.get(req.params.id);
+  if (!buf) return res.status(404).end();
+  res.setHeader('Content-Type', 'model/gltf-binary');
+  res.setHeader('Content-Disposition', `attachment; filename="${req.params.id}.glb"`);
+  res.end(buf);
+});
+
 app.get('/api/3d/status/:jobId', async (req, res) => {
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'unknown job' });
@@ -373,20 +459,41 @@ app.get('/api/3d/status/:jobId', async (req, res) => {
     const json = await meshyResp.json();
     const status = meshyToJobStatus(json.status);
     const progress = typeof json.progress === 'number' ? json.progress : job.lastProgress;
-    const modelUrl =
+    let modelUrl =
       (json.model_urls && (json.model_urls.glb || json.model_urls.fbx)) || null;
     const taskError = json.task_error && json.task_error.message;
 
+    // If this is the first time we see SUCCEEDED, optionally merge into base.
+    if (status === 'completed' && modelUrl && !job.lastModelUrl) {
+      if (job.baseSprite) {
+        try {
+          console.log(`[3d/status] merging ${job.baseSprite} + meshy output…`);
+          const meshyResp = await fetch(modelUrl);
+          if (!meshyResp.ok) throw new Error(`meshy GLB fetch failed (${meshyResp.status})`);
+          const meshyGlb = Buffer.from(await meshyResp.arrayBuffer());
+          const basePath = path.join(SPRITES_DIR, job.baseSprite);
+          if (!fs.existsSync(basePath)) throw new Error(`base sprite not found: ${job.baseSprite}`);
+          const merged = await mergeGlbs(basePath, meshyGlb);
+          const mergedId = `merged-${job.jobId}`;
+          mergedGlbs.set(mergedId, merged);
+          modelUrl = `${baseUrl()}/merged/${mergedId}.glb`;
+          console.log(`[3d/status] merged GLB → ${modelUrl} (${merged.length} bytes)`);
+        } catch (err) {
+          console.error('[3d/status] merge failed, falling back to raw Meshy URL:', err.message);
+        }
+      }
+      job.lastModelUrl = modelUrl;
+    }
+
     job.lastStatus = status;
     job.lastProgress = progress;
-    if (modelUrl) job.lastModelUrl = modelUrl;
     if (taskError) job.lastError = taskError;
 
     res.json({
       jobId: job.jobId,
       status,
       progress,
-      ...(modelUrl ? { modelUrl } : {}),
+      ...(job.lastModelUrl ? { modelUrl: job.lastModelUrl } : {}),
       ...(taskError ? { error: taskError } : {}),
     });
   } catch (err) {

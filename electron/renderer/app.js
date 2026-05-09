@@ -755,7 +755,49 @@ generate2dBtn.addEventListener('click', async () => {
       const upComposite = await uploadImage(compositeFile, `${BACKEND_URL}/api/upload-image`);
       imageUrlFor3D = upComposite.imageUrl;
     }
-    lastTwoDResult = { finalDisplayUrl, imageUrlFor3D, prompt: prompt || '' };
+
+    // ALSO build a "feature-only" crop image. When a base sprite is selected
+    // for merging, this gets sent to Meshy instead of the full composite —
+    // so Meshy generates 3D of just the new feature (e.g. just the crown),
+    // which we then attach to the base GLB.
+    let featureCropUrlFor3D = null;
+    if (baseImageData) {
+      try {
+        const currentData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const maskData = computeInpaintMask(baseImageData, currentData);
+        if (maskHasContent(maskData)) {
+          const bbox = padBbox(computeMaskBbox(maskData), canvas.width, canvas.height, 24);
+          // Render the inpainted output and copy just the bbox region onto white.
+          const inpaintImg = await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = finalDisplayUrl;
+          });
+          const cropC = document.createElement('canvas');
+          cropC.width = bbox.w;
+          cropC.height = bbox.h;
+          const cctx = cropC.getContext('2d');
+          cctx.fillStyle = '#ffffff';
+          cctx.fillRect(0, 0, bbox.w, bbox.h);
+          cctx.drawImage(inpaintImg, bbox.x, bbox.y, bbox.w, bbox.h, 0, 0, bbox.w, bbox.h);
+          const safeCrop = ensureMinImageSize(cropC, 256);
+          const cropFile = await canvasToPngFile(safeCrop, 'feature-crop.png');
+          const upCrop = await uploadImage(cropFile, `${BACKEND_URL}/api/upload-image`);
+          featureCropUrlFor3D = upCrop.imageUrl;
+        }
+      } catch (err) {
+        console.warn('feature crop build failed:', err);
+      }
+    }
+
+    lastTwoDResult = {
+      finalDisplayUrl,
+      imageUrlFor3D,
+      featureCropUrlFor3D,
+      prompt: prompt || '',
+    };
     generate3dBtn.disabled = false;
   } catch (err) {
     stopSyntheticProgress();
@@ -783,11 +825,18 @@ generate3dBtn.addEventListener('click', async () => {
   try {
     const provider = new BackendThreeDProvider({ baseUrl: BACKEND_URL });
     const baseSprite = spriteSelect.value || null;
+    // If we're merging into a base sprite, send Meshy ONLY the cropped feature
+    // so it generates 3D of just the new addition (not "duck with crown").
+    const useFeatureCrop = !!(baseSprite && lastTwoDResult.featureCropUrlFor3D);
+    const imageUrl3D = useFeatureCrop
+      ? lastTwoDResult.featureCropUrlFor3D
+      : lastTwoDResult.imageUrlFor3D;
     if (baseSprite) {
       logLine(`will merge into base sprite: ${baseSprite}`);
+      if (useFeatureCrop) logLine('sending Meshy the feature crop (just the addition)');
     }
     const started = await provider.startGeneration({
-      imageUrl: lastTwoDResult.imageUrlFor3D,
+      imageUrl: imageUrl3D,
       prompt: lastTwoDResult.prompt || undefined,
       mode: 'object',
       baseSprite,
