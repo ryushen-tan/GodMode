@@ -18,7 +18,15 @@ const fs = require('fs');
 const { NodeIO } = require('@gltf-transform/core');
 const { ALL_EXTENSIONS } = require('@gltf-transform/extensions');
 const { bounds } = require('@gltf-transform/functions');
-const draco3d = require('draco3dgltf');
+// Optional: only used by the 3D mesh-merge / scale post-process. If the
+// dep isn't installed locally we still want the rest of the backend to
+// boot — particularly the 2D pipeline.
+let draco3d = null;
+try {
+  draco3d = require('draco3dgltf');
+} catch (err) {
+  console.warn('[backend] draco3dgltf not installed — 3D merge/scale disabled. Run `npm install` in backend/.');
+}
 
 const PORT = Number(process.env.BACKEND_PORT || 3001);
 const REGION = process.env.AWS_REGION || 'us-east-1';
@@ -405,12 +413,13 @@ async function removeBackgroundViaBedrock(imageBuffer) {
 // in 2D appears on the side of the 3D bottle. Otherwise falls back to "on
 // top of base, centered."
 async function mergeGlbs(baseGlbPath, additionGlbBuffer, featureBbox) {
-  const io = new NodeIO()
-    .registerExtensions(ALL_EXTENSIONS)
-    .registerDependencies({
+  const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
+  if (draco3d) {
+    io.registerDependencies({
       'draco3d.decoder': await draco3d.createDecoderModule(),
       'draco3d.encoder': await draco3d.createEncoderModule(),
     });
+  }
   const baseDoc = await io.read(baseGlbPath);
   const additionDoc = await io.readBinary(additionGlbBuffer);
 
@@ -504,12 +513,13 @@ async function mergeGlbs(baseGlbPath, additionGlbBuffer, featureBbox) {
 // Scale a Meshy-generated GLB so its largest dimension matches the base
 // sprite's largest dimension. Returns the rescaled GLB as a Buffer.
 async function scaleGlbToMatchBase(meshyGlbBuffer, baseGlbPath) {
-  const io = new NodeIO()
-    .registerExtensions(ALL_EXTENSIONS)
-    .registerDependencies({
+  const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
+  if (draco3d) {
+    io.registerDependencies({
       'draco3d.decoder': await draco3d.createDecoderModule(),
       'draco3d.encoder': await draco3d.createEncoderModule(),
     });
+  }
 
   const baseDoc = await io.read(baseGlbPath);
   const meshyDoc = await io.readBinary(meshyGlbBuffer);
