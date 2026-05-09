@@ -456,6 +456,44 @@ async function mergeGlbs(baseGlbPath, additionGlbBuffer, featureBbox) {
   return Buffer.from(await io.writeBinary(baseDoc));
 }
 
+// Scale a Meshy-generated GLB so its largest dimension matches the base
+// sprite's largest dimension. Returns the rescaled GLB as a Buffer.
+async function scaleGlbToMatchBase(meshyGlbBuffer, baseGlbPath) {
+  const io = new NodeIO()
+    .registerExtensions(ALL_EXTENSIONS)
+    .registerDependencies({
+      'draco3d.decoder': await draco3d.createDecoderModule(),
+      'draco3d.encoder': await draco3d.createEncoderModule(),
+    });
+
+  const baseDoc = await io.read(baseGlbPath);
+  const meshyDoc = await io.readBinary(meshyGlbBuffer);
+
+  const baseScene = baseDoc.getRoot().listScenes()[0];
+  const meshyScene = meshyDoc.getRoot().listScenes()[0];
+  if (!baseScene || !meshyScene) throw new Error('missing scene in base or meshy GLB');
+
+  const bb = bounds(baseScene);
+  const mb = bounds(meshyScene);
+  const baseMax = Math.max(bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]);
+  const meshyMax = Math.max(mb.max[0] - mb.min[0], mb.max[1] - mb.min[1], mb.max[2] - mb.min[2]);
+  if (!isFinite(baseMax) || !isFinite(meshyMax) || meshyMax === 0) {
+    throw new Error(`bad bounds: base=${baseMax}, meshy=${meshyMax}`);
+  }
+  const scale = baseMax / meshyMax;
+  console.log(`[scale] base=${baseMax.toFixed(3)}, meshy=${meshyMax.toFixed(3)}, factor=${scale.toFixed(3)}`);
+
+  // Wrap all root nodes in one uniformly-scaled wrapper.
+  const wrapper = meshyDoc.createNode('scale-to-base').setScale([scale, scale, scale]);
+  for (const node of meshyScene.listChildren()) {
+    meshyScene.removeChild(node);
+    wrapper.addChild(node);
+  }
+  meshyScene.addChild(wrapper);
+
+  return Buffer.from(await io.writeBinary(meshyDoc));
+}
+
 function meshyToJobStatus(meshyStatus) {
   switch (meshyStatus) {
     case 'PENDING':     return 'queued';
@@ -469,7 +507,7 @@ function meshyToJobStatus(meshyStatus) {
 }
 
 app.post('/api/3d/start', async (req, res) => {
-  const { imageUrl, prompt, baseSprite, featureBbox } = req.body || {};
+  const { imageUrl, prompt, baseSprite, scaleOnly } = req.body || {};
   if (!imageUrl) return res.status(400).json({ error: 'imageUrl required' });
   if (!MESHY_API_KEY) {
     return res.status(500).json({ error: 'MESHY_API_KEY missing in .env' });
@@ -529,7 +567,7 @@ app.post('/api/3d/start', async (req, res) => {
       lastError: null,
       prompt: prompt || null,
       baseSprite: baseSprite || null,
-      featureBbox: featureBbox || null,
+      scaleOnly: !!scaleOnly,
     });
     console.log(`[3d/start] jobId=${jobId} meshyTask=${meshyTaskId}`);
     res.json({ jobId, status: 'queued' });
@@ -570,23 +608,36 @@ app.get('/api/3d/status/:jobId', async (req, res) => {
       (json.model_urls && (json.model_urls.glb || json.model_urls.fbx)) || null;
     const taskError = json.task_error && json.task_error.message;
 
-    // If this is the first time we see SUCCEEDED, optionally merge into base.
+    // First time we see SUCCEEDED, optionally rescale to base sprite size.
     if (status === 'completed' && modelUrl && !job.lastModelUrl) {
       if (job.baseSprite) {
         try {
-          console.log(`[3d/status] merging ${job.baseSprite} + meshy output…`);
-          const meshyResp = await fetch(modelUrl);
-          if (!meshyResp.ok) throw new Error(`meshy GLB fetch failed (${meshyResp.status})`);
-          const meshyGlb = Buffer.from(await meshyResp.arrayBuffer());
           const basePath = path.join(SPRITES_DIR, job.baseSprite);
           if (!fs.existsSync(basePath)) throw new Error(`base sprite not found: ${job.baseSprite}`);
-          const merged = await mergeGlbs(basePath, meshyGlb, job.featureBbox);
-          const mergedId = `merged-${job.jobId}`;
-          mergedGlbs.set(mergedId, merged);
-          modelUrl = `${baseUrl()}/merged/${mergedId}.glb`;
-          console.log(`[3d/status] merged GLB → ${modelUrl} (${merged.length} bytes)`);
+          console.log(`[3d/status] downloading meshy output…`);
+          const meshyDl = await fetch(modelUrl);
+          if (!meshyDl.ok) throw new Error(`meshy GLB fetch failed (${meshyDl.status})`);
+          const meshyGlb = Buffer.from(await meshyDl.arrayBuffer());
+
+          if (job.scaleOnly) {
+            // Path A: scale Meshy output to match base sprite's dimensions
+            console.log(`[3d/status] scaling Meshy output to match ${job.baseSprite}…`);
+            const scaled = await scaleGlbToMatchBase(meshyGlb, basePath);
+            const scaledId = `scaled-${job.jobId}`;
+            mergedGlbs.set(scaledId, scaled);
+            modelUrl = `${baseUrl()}/merged/${scaledId}.glb`;
+            console.log(`[3d/status] scaled GLB → ${modelUrl} (${scaled.length} bytes)`);
+          } else {
+            // Path B: full mesh-merge (kept for future use)
+            console.log(`[3d/status] merging ${job.baseSprite} + meshy output…`);
+            const merged = await mergeGlbs(basePath, meshyGlb, job.featureBbox);
+            const mergedId = `merged-${job.jobId}`;
+            mergedGlbs.set(mergedId, merged);
+            modelUrl = `${baseUrl()}/merged/${mergedId}.glb`;
+            console.log(`[3d/status] merged GLB → ${modelUrl} (${merged.length} bytes)`);
+          }
         } catch (err) {
-          console.error('[3d/status] merge failed, falling back to raw Meshy URL:', err.message);
+          console.error('[3d/status] post-process failed, falling back to raw Meshy URL:', err.message);
         }
       }
       job.lastModelUrl = modelUrl;
