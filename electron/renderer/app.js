@@ -78,6 +78,87 @@ function togglePanel() {
 addButton.addEventListener('click', togglePanel);
 closePanelBtn.addEventListener('click', togglePanel);
 
+// ============================================================================
+// Export to X (Twitter) Functionality
+// ============================================================================
+
+const exportToXBtn = document.getElementById('export-to-x-btn');
+
+exportToXBtn.addEventListener('click', async () => {
+  if (exportToXBtn.classList.contains('posting')) return;
+
+  try {
+    exportToXBtn.classList.add('posting');
+    exportToXBtn.title = 'Capturing screenshot...';
+
+    // Request screenshot from Electron main process
+    const screenshot = await window.electronAPI.captureGameWindow();
+    
+    if (!screenshot) {
+      alert('Failed to capture screenshot');
+      return;
+    }
+
+    // Convert base64 to blob
+    const base64Data = screenshot.replace(/^data:image\/png;base64,/, '');
+    const byteCharacters = atob(base64Data);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: 'image/png' });
+
+    // Prompt for tweet text
+    const tweetText = prompt(
+      'Tweet text:',
+      'Check out my game! Made with #GodMode 🎮'
+    );
+
+    if (tweetText === null) {
+      // User cancelled
+      return;
+    }
+
+    exportToXBtn.title = 'Posting to X...';
+
+    // Send to backend
+    const formData = new FormData();
+    formData.append('screenshot', blob, 'game-screenshot.png');
+    formData.append('text', tweetText);
+
+    const response = await fetch(`${BACKEND_URL}/api/twitter/post`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || 'Failed to post to X');
+    }
+
+    // Show success
+    alert(`✅ Posted to X!\n\nView at: ${result.url || 'Twitter'}`);
+    exportToXBtn.title = 'Posted successfully!';
+    
+    // Open tweet in browser
+    if (result.url && window.electronAPI.openExternal) {
+      window.electronAPI.openExternal(result.url);
+    }
+
+  } catch (err) {
+    console.error('[Export to X] Error:', err);
+    alert(`Failed to post to X: ${err.message}`);
+    exportToXBtn.title = 'Export screenshot to X (Twitter)';
+  } finally {
+    exportToXBtn.classList.remove('posting');
+    setTimeout(() => {
+      exportToXBtn.title = 'Export screenshot to X (Twitter)';
+    }, 3000);
+  }
+});
+
 if (window.electronAPI) {
   window.electronAPI.onClosePanel(() => {
     if (panel.classList.contains('visible')) togglePanel();

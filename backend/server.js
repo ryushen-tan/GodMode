@@ -62,6 +62,14 @@ const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN || '';
 // camenduru/tripo-sr stable revision hash — the well-known hosted TripoSR.
 const REPLICATE_TRIPOSR_VERSION = 'e0d3fe8abce3ba86497ea3530d9eae59af7b2231b6c82bedfc32b0732d35ec3a';
 
+// CyStack Security Integration
+const { initializeCyStack } = require('./security/cystack-integration');
+const cystack = initializeCyStack();
+
+// Composio Twitter Integration
+const { getComposioService } = require('./services/composio-twitter');
+const composio = getComposioService();
+
 tick(`config (port=${PORT}, region=${REGION})`);
 const bedrock = new BedrockRuntimeClient({ region: REGION }); tick('bedrock client');
 const bedrockControl = new BedrockClient({ region: REGION }); tick('bedrock control client');
@@ -101,6 +109,7 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true, region: REGION, model: MODEL_ID });
 });
 
+// SMS test endpoint
 app.post('/api/sms/test', async (req, res) => {
   const { message } = req.body || {};
   if (!message || typeof message !== 'string') {
@@ -111,6 +120,71 @@ app.post('/api/sms/test', async (req, res) => {
     res.json({ ok: true, result: out || null });
   } catch (e) {
     res.status(502).json({ ok: false, error: e.message || String(e) });
+  }
+});
+
+// CyStack telemetry endpoint
+app.get('/api/cystack/telemetry', (_req, res) => {
+  try {
+    const telemetry = cystack.telemetry.getTelemetry(100);
+    res.json({
+      organizationId: cystack.config.organizationId,
+      sessionId: cystack.telemetry.sessionId,
+      telemetryEnabled: cystack.config.telemetryEnabled,
+      totalEvents: telemetry.length,
+      events: telemetry,
+    });
+  } catch (err) {
+    console.error('[cystack/telemetry] error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// Composio Twitter Integration Endpoints
+// ============================================================================
+
+// Check Twitter connection status
+app.get('/api/twitter/status', async (_req, res) => {
+  try {
+    await composio.initialize();
+    const status = await composio.checkConnection();
+    res.json(status);
+  } catch (err) {
+    console.error('[twitter/status] error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get Twitter OAuth connection URL
+app.get('/api/twitter/connect', async (_req, res) => {
+  try {
+    await composio.initialize();
+    const { url, connectionId } = await composio.getConnectionUrl();
+    res.json({ url, connectionId });
+  } catch (err) {
+    console.error('[twitter/connect] error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Post screenshot to Twitter
+app.post('/api/twitter/post', upload.single('screenshot'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No screenshot provided' });
+    }
+
+    const text = req.body.text || 'Check out my game! Made with #GodMode 🎮';
+    const imageBuffer = req.file.buffer;
+
+    await composio.initialize();
+    const result = await composio.postTweet(text, imageBuffer);
+
+    res.json(result);
+  } catch (err) {
+    console.error('[twitter/post] error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -925,6 +999,14 @@ app.post('/api/3d/stable-fast', async (req, res) => {
       if (sanitized) namePrefix = sanitized;
     }
     const outId = `${namePrefix}-${crypto.randomBytes(2).toString('hex')}`;
+    const filename = `${outId}.glb`;
+    
+    // CyStack: Scan file and send telemetry
+    await cystack.scanner.scanFile(glbBuf, {
+      source: 'stable-fast',
+      filename,
+    });
+    
     mergedGlbs.set(outId, glbBuf);
     try {
       mergedPreviews.set(outId, await generateRealPreviewPngForId(outId, glbBuf));
@@ -935,10 +1017,14 @@ app.post('/api/3d/stable-fast', async (req, res) => {
     const cloud = await attachCloudinaryLinks(outId, glbBuf);
     await maybeSendSmsWithCloudinaryLinks(cloud);
 
-    // Save directly to the game's sprites folder so the agent can use it immediately
-    const spritePath = path.join(SPRITES_DIR, `${outId}.glb`);
+    // Save to sprites folder
+    const spritePath = path.join(SPRITES_DIR, filename);
     fs.writeFileSync(spritePath, glbBuf);
-    console.log(`[stable-fast] Saved new sprite to: ${spritePath}`);
+    
+    // CyStack: Log import event
+    await cystack.scanner.logImport(filename, glbBuf, 'stable-fast');
+    
+    console.log(`[stable-fast] Saved: ${spritePath}`);
 
     const elapsedMs = Date.now() - startedAt;
     console.log(`[stable-fast] ${elapsedMs}ms, ${glbBuf.length} bytes`);
@@ -948,6 +1034,7 @@ app.post('/api/3d/stable-fast', async (req, res) => {
       ...(cloud ? cloud : {}),
       elapsedMs,
       format: 'glb',
+      cystack: { telemetrySent: true },
     });
   } catch (err) {
     console.error('[stable-fast] error:', err);
@@ -1000,6 +1087,14 @@ app.post('/api/3d/triposr', async (req, res) => {
       if (sanitized) namePrefix = sanitized;
     }
     const outId = `${namePrefix}-${crypto.randomBytes(2).toString('hex')}`;
+    const filename = `${outId}.glb`;
+    
+    // CyStack: Scan file and send telemetry
+    await cystack.scanner.scanFile(glbBuf, {
+      source: 'triposr',
+      filename,
+    });
+    
     mergedGlbs.set(outId, glbBuf);
     try {
       mergedPreviews.set(outId, await generateRealPreviewPngForId(outId, glbBuf));
@@ -1010,10 +1105,14 @@ app.post('/api/3d/triposr', async (req, res) => {
     const cloud = await attachCloudinaryLinks(outId, glbBuf);
     await maybeSendSmsWithCloudinaryLinks(cloud);
 
-    // Save directly to the game's sprites folder so the agent can use it immediately
-    const spritePath = path.join(SPRITES_DIR, `${outId}.glb`);
+    // Save to sprites folder
+    const spritePath = path.join(SPRITES_DIR, filename);
     fs.writeFileSync(spritePath, glbBuf);
-    console.log(`[triposr] Saved new sprite to: ${spritePath}`);
+    
+    // CyStack: Log import event
+    await cystack.scanner.logImport(filename, glbBuf, 'triposr');
+    
+    console.log(`[triposr] Saved: ${spritePath}`);
 
     const elapsedMs = Date.now() - startedAt;
     const remoteMs = tsRes.headers.get('x-triposr-elapsed-ms');
@@ -1024,6 +1123,7 @@ app.post('/api/3d/triposr', async (req, res) => {
       ...(cloud ? cloud : {}),
       elapsedMs,
       format: 'glb',
+      cystack: { telemetrySent: true },
     });
   } catch (err) {
     console.error('[triposr] error:', err);
@@ -1111,8 +1211,6 @@ app.post('/api/3d/replicate-triposr', async (req, res) => {
       console.warn('[replicate-triposr] real preview failed, falling back:', e.message);
       try { mergedPreviews.set(outId, await generatePlaceholderPreviewPng(glbBuf)); } catch {}
     }
-    const elapsedMs = Date.now() - startedAt;
-    console.log(`[replicate-triposr] ${elapsedMs}ms (Replicate ${prediction.metrics && prediction.metrics.predict_time}s), ${glbBuf.length} bytes`);
     const cloud = await attachCloudinaryLinks(outId, glbBuf);
     await maybeSendSmsWithCloudinaryLinks(cloud);
     

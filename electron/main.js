@@ -290,6 +290,42 @@ function createWindow() {
     }
   });
 
+  // Capture Godot game window screenshot
+  ipcMain.handle('capture-game-window', async () => {
+    try {
+      const { desktopCapturer } = require('electron');
+      
+      // Get all windows
+      const sources = await desktopCapturer.getSources({
+        types: ['window'],
+        thumbnailSize: { width: 1920, height: 1080 }
+      });
+
+      // Find Godot window
+      const godotWindow = sources.find(source => 
+        source.name.toLowerCase().includes('godot') ||
+        source.name.toLowerCase().includes('game')
+      );
+
+      if (!godotWindow) {
+        console.error('[Screenshot] Godot window not found');
+        return null;
+      }
+
+      // Return thumbnail as data URL
+      return godotWindow.thumbnail.toDataURL();
+    } catch (err) {
+      console.error('[Screenshot] Error:', err);
+      return null;
+    }
+  });
+
+  // Open URL in external browser
+  ipcMain.on('open-external', (_event, url) => {
+    const { shell } = require('electron');
+    shell.openExternal(url);
+  });
+
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.key === 'Escape') {
       mainWindow.webContents.send('close-panel');
