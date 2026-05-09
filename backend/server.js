@@ -310,10 +310,13 @@ async function removeBackgroundViaBedrock(imageBuffer) {
   return Buffer.from(b64, 'base64');
 }
 
-// Merge an addition GLB into a base GLB. The addition is translated so its
-// bottom (min.y) sits at the base's top (max.y) plus a small gap, and X/Z
-// centered on the base. Returns the merged GLB as a Buffer.
-async function mergeGlbs(baseGlbPath, additionGlbBuffer) {
+// Merge an addition GLB into a base GLB.
+// If featureBbox is provided (the 2D bounding box of the user's drawing in
+// canvas coords), the addition is placed at the corresponding 3D location
+// on the front face of the base — so a crown drawn on the side of a bottle
+// in 2D appears on the side of the 3D bottle. Otherwise falls back to "on
+// top of base, centered."
+async function mergeGlbs(baseGlbPath, additionGlbBuffer, featureBbox) {
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
   const baseDoc = await io.read(baseGlbPath);
   const additionDoc = await io.readBinary(additionGlbBuffer);
@@ -321,15 +324,6 @@ async function mergeGlbs(baseGlbPath, additionGlbBuffer) {
   const baseBounds = bounds(baseDoc.getRoot().listScenes()[0]);
   const addBounds = bounds(additionDoc.getRoot().listScenes()[0]);
 
-  // Compute translation so the addition sits on top of the base, centered.
-  const baseCenterXZ = [
-    (baseBounds.min[0] + baseBounds.max[0]) / 2,
-    (baseBounds.min[2] + baseBounds.max[2]) / 2,
-  ];
-  const addCenterXZ = [
-    (addBounds.min[0] + addBounds.max[0]) / 2,
-    (addBounds.min[2] + addBounds.max[2]) / 2,
-  ];
   const baseSize = [
     baseBounds.max[0] - baseBounds.min[0],
     baseBounds.max[1] - baseBounds.min[1],
@@ -340,19 +334,52 @@ async function mergeGlbs(baseGlbPath, additionGlbBuffer) {
     addBounds.max[1] - addBounds.min[1],
     addBounds.max[2] - addBounds.min[2],
   ];
-
-  // Scale the addition so its largest dimension is ~25% of the base's largest.
+  const addCenter = [
+    (addBounds.min[0] + addBounds.max[0]) / 2,
+    (addBounds.min[1] + addBounds.max[1]) / 2,
+    (addBounds.min[2] + addBounds.max[2]) / 2,
+  ];
   const baseMax = Math.max(...baseSize);
   const addMax = Math.max(...addSize) || 1;
-  const targetScale = (baseMax * 0.25) / addMax;
 
-  // Translation: place addition's min.y at base's max.y + small gap.
-  const gap = baseMax * 0.02;
-  const tx = baseCenterXZ[0] - addCenterXZ[0] * targetScale;
-  const ty = baseBounds.max[1] - addBounds.min[1] * targetScale + gap;
-  const tz = baseCenterXZ[1] - addCenterXZ[1] * targetScale;
+  let targetScale;
+  let target3D;
 
-  // Wrap the addition's root nodes in a single transformed node.
+  if (featureBbox && featureBbox.canvasW && featureBbox.canvasH) {
+    // Map the 2D bbox into 3D assuming the photo was a front-view of the
+    // base mesh. Image Y is top-down, world Y is bottom-up, so invert.
+    const bxNorm = (featureBbox.x + featureBbox.w / 2) / featureBbox.canvasW; // 0..1, left->right
+    const byNorm = (featureBbox.y + featureBbox.h / 2) / featureBbox.canvasH; // 0..1, top->bottom
+    const wNorm = featureBbox.w / featureBbox.canvasW;
+    const hNorm = featureBbox.h / featureBbox.canvasH;
+    const bboxRel = Math.max(wNorm, hNorm);
+    targetScale = (baseMax * bboxRel) / addMax;
+
+    target3D = {
+      x: baseBounds.min[0] + bxNorm * baseSize[0],
+      y: baseBounds.max[1] - byNorm * baseSize[1],
+      // Place slightly in front of the base so the addition isn't buried.
+      z: baseBounds.max[2] + baseSize[2] * 0.05,
+    };
+    console.log(
+      `[merge] bbox-positioned: target3D=(${target3D.x.toFixed(3)}, ${target3D.y.toFixed(3)}, ${target3D.z.toFixed(3)}) scale=${targetScale.toFixed(3)}`,
+    );
+  } else {
+    // Fallback: top-of-base, centered.
+    targetScale = (baseMax * 0.25) / addMax;
+    target3D = {
+      x: (baseBounds.min[0] + baseBounds.max[0]) / 2,
+      y: baseBounds.max[1] + baseMax * 0.02 + (addBounds.max[1] - addBounds.min[1]) * targetScale * 0.5,
+      z: (baseBounds.min[2] + baseBounds.max[2]) / 2,
+    };
+    console.log('[merge] no bbox — placing addition on top of base');
+  }
+
+  // Translation so the addition's center lands at target3D after scaling.
+  const tx = target3D.x - addCenter[0] * targetScale;
+  const ty = target3D.y - addCenter[1] * targetScale;
+  const tz = target3D.z - addCenter[2] * targetScale;
+
   const wrapper = additionDoc.createNode('addition-anchor')
     .setTranslation([tx, ty, tz])
     .setScale([targetScale, targetScale, targetScale]);
@@ -394,7 +421,7 @@ function meshyToJobStatus(meshyStatus) {
 }
 
 app.post('/api/3d/start', async (req, res) => {
-  const { imageUrl, prompt, baseSprite } = req.body || {};
+  const { imageUrl, prompt, baseSprite, featureBbox } = req.body || {};
   if (!imageUrl) return res.status(400).json({ error: 'imageUrl required' });
   if (!MESHY_API_KEY) {
     return res.status(500).json({ error: 'MESHY_API_KEY missing in .env' });
@@ -453,8 +480,8 @@ app.post('/api/3d/start', async (req, res) => {
       lastModelUrl: null,
       lastError: null,
       prompt: prompt || null,
-      // Recorded for Pass 2 (gltf-transform mesh merge into this sprite).
       baseSprite: baseSprite || null,
+      featureBbox: featureBbox || null,
     });
     console.log(`[3d/start] jobId=${jobId} meshyTask=${meshyTaskId}`);
     res.json({ jobId, status: 'queued' });
@@ -505,7 +532,7 @@ app.get('/api/3d/status/:jobId', async (req, res) => {
           const meshyGlb = Buffer.from(await meshyResp.arrayBuffer());
           const basePath = path.join(SPRITES_DIR, job.baseSprite);
           if (!fs.existsSync(basePath)) throw new Error(`base sprite not found: ${job.baseSprite}`);
-          const merged = await mergeGlbs(basePath, meshyGlb);
+          const merged = await mergeGlbs(basePath, meshyGlb, job.featureBbox);
           const mergedId = `merged-${job.jobId}`;
           mergedGlbs.set(mergedId, merged);
           modelUrl = `${baseUrl()}/merged/${mergedId}.glb`;
