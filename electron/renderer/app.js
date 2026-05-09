@@ -459,6 +459,9 @@ generate3dBtn.addEventListener('click', async () => {
       },
       `${BACKEND_URL}/api/generate-2d`,
     );
+    if (enhanced.usedFallback) {
+      logLine(`⚠ inpaint blocked by safety filter — fell back to ${enhanced.usedFallback}`);
+    }
     logLine(`2D ready → ${enhanced.imageUrl}`);
     resultPreview.src = enhanced.imageUrl;
 

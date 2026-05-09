@@ -122,7 +122,8 @@ async function generate2D(request, endpoint, options = {}) {
     imageUrl: r.imageUrl,
     id: typeof r.id === "string" ? r.id : void 0,
     autoDescription: typeof r.autoDescription === "string" ? r.autoDescription : void 0,
-    finalPrompt: typeof r.finalPrompt === "string" ? r.finalPrompt : void 0
+    finalPrompt: typeof r.finalPrompt === "string" ? r.finalPrompt : void 0,
+    usedFallback: typeof r.usedFallback === "string" ? r.usedFallback : void 0
   };
 }
 

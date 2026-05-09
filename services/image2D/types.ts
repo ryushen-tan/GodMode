@@ -10,4 +10,6 @@ export type Generate2DResult = {
   id?: string;
   autoDescription?: string;
   finalPrompt?: string;
+  /** Set by backend if it had to retry with a different model (e.g. when inpaint was filtered). */
+  usedFallback?: string;
 };

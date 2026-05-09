@@ -53,6 +53,7 @@ export async function generate2D(
     id?: unknown;
     autoDescription?: unknown;
     finalPrompt?: unknown;
+    usedFallback?: unknown;
   };
   return {
     imageUrl: r.imageUrl,
@@ -60,6 +61,8 @@ export async function generate2D(
     autoDescription:
       typeof r.autoDescription === "string" ? r.autoDescription : undefined,
     finalPrompt: typeof r.finalPrompt === "string" ? r.finalPrompt : undefined,
+    usedFallback:
+      typeof r.usedFallback === "string" ? r.usedFallback : undefined,
   };
 }
 
