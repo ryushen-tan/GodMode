@@ -352,9 +352,9 @@ function startSyntheticProgress(cap = 90) {
   let pct = 0;
   resultProgressFill.style.width = '0%';
   progressTimer = setInterval(() => {
-    pct += (cap - pct) * 0.025;
+    pct += (cap - pct) * 0.06;
     resultProgressFill.style.width = pct.toFixed(1) + '%';
-  }, 150);
+  }, 120);
 }
 function stopSyntheticProgress() {
   if (progressTimer) {
@@ -824,22 +824,12 @@ generate3dBtn.addEventListener('click', async () => {
 
   try {
     const provider = new BackendThreeDProvider({ baseUrl: BACKEND_URL });
-    const baseSprite = spriteSelect.value || null;
-    // If we're merging into a base sprite, send Meshy ONLY the cropped feature
-    // so it generates 3D of just the new addition (not "duck with crown").
-    const useFeatureCrop = !!(baseSprite && lastTwoDResult.featureCropUrlFor3D);
-    const imageUrl3D = useFeatureCrop
-      ? lastTwoDResult.featureCropUrlFor3D
-      : lastTwoDResult.imageUrlFor3D;
-    if (baseSprite) {
-      logLine(`will merge into base sprite: ${baseSprite}`);
-      if (useFeatureCrop) logLine('sending Meshy the feature crop (just the addition)');
-    }
     const started = await provider.startGeneration({
-      imageUrl: imageUrl3D,
+      imageUrl: lastTwoDResult.imageUrlFor3D,
       prompt: lastTwoDResult.prompt || undefined,
       mode: 'object',
-      baseSprite,
+      // baseSprite intentionally not sent — merge is disabled while we
+      // tune size/position. Meshy's single-image output is more coherent.
     });
     logLine(`3D job started: ${started.jobId} (Meshy can take 1–3 min)`);
 
