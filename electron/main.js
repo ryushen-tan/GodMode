@@ -12,6 +12,8 @@ let godotProcess = null;
 let trackingInterval = null;
 let fileWatcher = null;
 let restartTimeout = null;
+let relaunchTimeout = null;
+let restartInProgress = false;
 
 const GAME_PROJECT_PATH = path.join(__dirname, '..', 'example_game', 'godot-FirstPersonStarter-main');
 
@@ -145,15 +147,22 @@ function startTracking() {
 
 function findRunningGodotInfo() {
   try {
-    const result = execSync('ps aux | grep -i "Godot.app" | grep -v grep | head -1').toString().trim();
+    const result = execSync('ps aux | grep -i "Godot.app" | grep -v grep').toString().trim();
     if (!result) return null;
+    const line = result
+      .split('\n')
+      .find((item) => item.includes(`--path ${GAME_PROJECT_PATH}`)
+        && !item.includes('--headless')
+        && !item.includes('--import')
+        && !item.includes('--check-only'));
+    if (!line) return null;
     
     // Extract PID (first column after username)
-    const parts = result.split(/\s+/);
+    const parts = line.split(/\s+/);
     const pid = parseInt(parts[1]);
     
     // Extract the full path to the Godot binary
-    const pathMatch = result.match(/(\S+Godot\.app\/Contents\/MacOS\/Godot)/);
+    const pathMatch = line.match(/(\S+Godot\.app\/Contents\/MacOS\/Godot)/);
     const binaryPath = pathMatch ? pathMatch[1] : null;
     
     return { pid, binaryPath };
@@ -163,12 +172,33 @@ function findRunningGodotInfo() {
 }
 
 function restartGodot(delayMs = 500) {
+  if (restartInProgress) return;
+  if (restartTimeout) {
+    clearTimeout(restartTimeout);
+    restartTimeout = null;
+  }
+  if (relaunchTimeout) {
+    clearTimeout(relaunchTimeout);
+    relaunchTimeout = null;
+  }
+  restartInProgress = true;
+
+  const finishRestart = () => {
+    relaunchTimeout = setTimeout(() => {
+      restartInProgress = false;
+      relaunchTimeout = null;
+    }, delayMs + 2500);
+  };
+
   // If we launched Godot ourselves
   if (godotProcess) {
     console.log('[GodMode] Restarting Godot (managed process)...');
     godotProcess.kill();
     godotProcess = null;
-    setTimeout(launchGodot, delayMs);
+    relaunchTimeout = setTimeout(() => {
+      launchGodot();
+      finishRestart();
+    }, delayMs);
     return;
   }
 
@@ -180,17 +210,20 @@ function restartGodot(delayMs = 500) {
       // Kill the external Godot process
       execSync(`kill ${info.pid}`);
       // Wait and relaunch with the same binary
-      setTimeout(() => {
+      relaunchTimeout = setTimeout(() => {
         console.log(`[GodMode] Relaunching Godot from: ${info.binaryPath}`);
         exec(`"${info.binaryPath}" --path "${GAME_PROJECT_PATH}" &`);
+        finishRestart();
       }, delayMs);
     } catch (err) {
       console.error('[GodMode] Failed to restart external Godot:', err.message);
+      restartInProgress = false;
     }
   } else {
     console.log('[GodMode] No running Godot found to restart.');
     // Try to launch if binary exists
     launchGodot();
+    finishRestart();
   }
 }
 
@@ -219,10 +252,11 @@ function launchGodot() {
 function startFileWatcher() {
   if (fileWatcher) return;
 
-  const WATCHED_EXTS = new Set(['.gd', '.tscn', '.tres', '.godot']);
+  const WATCHED_EXTS = new Set(['.gd', '.tscn', '.tres', '.godot', '.glb', '.import']);
 
   fileWatcher = fs.watch(GAME_PROJECT_PATH, { recursive: true }, (event, filename) => {
     if (!filename) return;
+    if (restartInProgress) return;
     const ext = path.extname(filename);
     if (!WATCHED_EXTS.has(ext)) return;
     if (path.basename(filename).startsWith('.')) return;

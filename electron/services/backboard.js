@@ -1,4 +1,11 @@
-const { listFiles, readFile, writeFile, grepFiles, checkGodotErrors } = require('./fileEditor');
+const {
+  listFiles,
+  readFile,
+  writeFile,
+  grepFiles,
+  checkGodotErrors,
+  addSpriteToMainScene
+} = require('./fileEditor');
 
 const BACKBOARD_API = 'https://app.backboard.io/api';
 
@@ -137,14 +144,50 @@ async function runAgent(prompt, apiKey, threadId, onStep, captureScreenshot) {
       // electron/services/backboard.js -> go up to electron/ -> up to root -> into example_game
       const spritesDir = path.join(__dirname, '..', '..', 'example_game', 'godot-FirstPersonStarter-main', 'sprites');
       let availableSprites = [];
+      let availableSpriteFiles = [];
       try {
-        availableSprites = fs.readdirSync(spritesDir)
+        availableSpriteFiles = fs.readdirSync(spritesDir)
           .filter(f => f.toLowerCase().endsWith('.glb'))
+          .map(f => ({ name: f, mtimeMs: fs.statSync(path.join(spritesDir, f)).mtimeMs }))
+          .sort((a, b) => b.mtimeMs - a.mtimeMs);
+        availableSprites = availableSpriteFiles
+          .map(({ name }) => name)
           .map(f => `res://sprites/${f}`);
         console.log(`[GodMode] Found ${availableSprites.length} sprites in ${spritesDir}`);
       } catch (err) {
         console.error('[GodMode] Could not list sprites:', err.message);
         console.error('[GodMode] Tried path:', spritesDir);
+      }
+
+      const spriteAddMatch = prompt.match(/res:\/\/sprites\/[^"'\s)]+\.glb/i);
+      const wantsSpritePlacement = /\b(add|place|put|insert|spawn|move|drop)\b/i.test(prompt)
+        && /\b(model|sprite|asset|object|glb|scene|godot|level|new|latest|generated|it|them)\b/i.test(prompt);
+      const selectedSpritePath = spriteAddMatch?.[0] || (wantsSpritePlacement && availableSpriteFiles[0]
+        ? `res://sprites/${availableSpriteFiles[0].name}`
+        : null);
+
+      if (selectedSpritePath && (spriteAddMatch || wantsSpritePlacement)) {
+        const placementPrompt = spriteAddMatch
+          ? prompt
+          : `${prompt}\nAdd ${selectedSpritePath} to the scene at position (0, 2, 0)`;
+        onStep && onStep({ type: 'tool_call', tool: 'add_sprite_to_scene', args: { sprite: selectedSpritePath } });
+        const added = addSpriteToMainScene(placementPrompt);
+        onStep && onStep({ type: 'tool_result', tool: 'add_sprite_to_scene', output: added.message });
+
+        onStep && onStep({ type: 'tool_call', tool: 'check_errors', args: {} });
+        const errorCheck = checkGodotErrors();
+        if (!errorCheck.success) {
+          onStep && onStep({ type: 'tool_result', tool: 'check_errors', output: `✗ Errors found:\n${errorCheck.error}` });
+          throw new Error(`Godot validation failed after adding sprite:\n${errorCheck.error}`);
+        }
+
+        const msg = errorCheck.warning || '✓ No errors found!';
+        onStep && onStep({ type: 'tool_result', tool: 'check_errors', output: msg });
+        return {
+          content: added.message,
+          thread_id: currentThreadId,
+          filesChanged: [added.scenePath, ...(added.importCreated ? [`sprites/${added.spritePath.split('/').pop()}.import`] : [])],
+        };
       }
 
       // Step 2: Grep for relevant files based on prompt keywords

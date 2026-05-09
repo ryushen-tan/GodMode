@@ -200,6 +200,14 @@ const SPRITES_DIR = path.join(
   'sprites',
 );
 
+function saveSpriteGlb(filename, glbBuf) {
+  const spritePath = path.join(SPRITES_DIR, filename);
+  fs.writeFileSync(spritePath, glbBuf);
+  const { createImportFile } = require('./ensure-imports');
+  createImportFile(spritePath);
+  return spritePath;
+}
+
 app.get('/api/sprites', (_req, res) => {
   try {
     const files = fs
@@ -1019,8 +1027,7 @@ app.post('/api/3d/stable-fast', async (req, res) => {
     await maybeSendSmsWithCloudinaryLinks(cloud);
 
     // Save to sprites folder
-    const spritePath = path.join(SPRITES_DIR, filename);
-    fs.writeFileSync(spritePath, glbBuf);
+    const spritePath = saveSpriteGlb(filename, glbBuf);
     
     // CyStack: Log import event
     await cystack.scanner.logImport(filename, glbBuf, 'stable-fast');
@@ -1107,8 +1114,7 @@ app.post('/api/3d/triposr', async (req, res) => {
     await maybeSendSmsWithCloudinaryLinks(cloud);
 
     // Save to sprites folder
-    const spritePath = path.join(SPRITES_DIR, filename);
-    fs.writeFileSync(spritePath, glbBuf);
+    const spritePath = saveSpriteGlb(filename, glbBuf);
     
     // CyStack: Log import event
     await cystack.scanner.logImport(filename, glbBuf, 'triposr');
@@ -1216,8 +1222,7 @@ app.post('/api/3d/replicate-triposr', async (req, res) => {
     await maybeSendSmsWithCloudinaryLinks(cloud);
     
     // Save to sprites folder  
-    const spritePath = path.join(SPRITES_DIR, `${outId}.glb`);
-    fs.writeFileSync(spritePath, glbBuf);
+    const spritePath = saveSpriteGlb(`${outId}.glb`, glbBuf);
     
     const elapsedMs = Date.now() - startedAt;
     console.log(`[replicate-triposr] ${elapsedMs}ms (Replicate ${prediction.metrics && prediction.metrics.predict_time}s), saved to ${spritePath}`);
