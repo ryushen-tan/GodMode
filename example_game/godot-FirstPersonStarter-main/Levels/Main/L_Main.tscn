@@ -5,6 +5,7 @@
 [ext_resource type="PackedScene" uid="uid://ctkc7yqdqdtao" path="res://Levels/Main/Geometry/Floor.tscn" id="1_yb0tt"]
 [ext_resource type="PackedScene" uid="uid://cdn7d5mxwdyks" path="res://Levels/Main/Geometry/Wall.tscn" id="3_jw8hm"]
 [ext_resource type="Material" uid="uid://sofvlrq3jmka" path="res://Levels/Main/Materials/M_Dark.tres" id="4_m7xar"]
+[ext_resource type="PackedScene" uid="uid://cvjkq7pd86jww" path="res://sprites/Avocado.glb" id="5_avocado"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_egctf"]
 size = Vector3(8, 4, 4)
@@ -69,16 +70,26 @@ ambient_light_sky_contribution = 0.9
 tonemap_mode = 2
 glow_enabled = true
 
+[sub_resource type="BoxShape3D" id="BoxShape3D_avocado"]
+size = Vector3(1, 1, 1)
+
 [node name="L_Main" type="Node3D" unique_id=127289839]
 script = ExtResource("1_km1jj")
 
 [node name="Player" parent="." unique_id=77986780 instance=ExtResource("1_qgept")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
 
+[node name="Avocado" parent="." instance=ExtResource("5_avocado")]
+transform = Transform3D(10, 0, 0, 0, 10, 0, 0, 0, 10, 0, 2, -2)
+
+[node name="AvocadoBody" type="StaticBody3D" parent="Avocado"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Avocado/AvocadoBody"]
+shape = SubResource("BoxShape3D_avocado")
+
 [node name="ArenaGeometry" type="Node3D" parent="." unique_id=1696368159]
 
 [node name="Floor" parent="ArenaGeometry" unique_id=12353313 instance=ExtResource("1_yb0tt")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.0029859543, -0.35585666, 0.2198925)
 
 [node name="Wall" parent="ArenaGeometry" unique_id=1091370665 instance=ExtResource("3_jw8hm")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5.75, -20)

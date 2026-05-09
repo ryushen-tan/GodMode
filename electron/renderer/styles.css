@@ -249,6 +249,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .upload-button {
@@ -281,6 +282,14 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.match-result {
+  width: 100%;
+  font-size: 12px;
+  color: #333;
+  margin-top: 6px;
+  word-break: break-word;
 }
 
 @keyframes slideDown {
