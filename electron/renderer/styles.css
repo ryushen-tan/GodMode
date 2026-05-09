@@ -527,6 +527,15 @@ body {
   flex-direction: column;
   gap: 6px;
 }
+.generate-buttons {
+  display: flex;
+  gap: 8px;
+}
+.generate-buttons .upload-button { flex: 1; justify-content: center; }
+.generate-buttons .upload-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 #sprite-select {
   width: 100%;
   padding: 8px 10px;

@@ -327,7 +327,8 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// ---- Generate 3D pipeline (canvas → 2D image → Meshy 3D) ----
+// ---- Generate pipeline (split into 2D and 3D stages) ----
+const generate2dBtn = document.getElementById('generate-2d-btn');
 const generate3dBtn = document.getElementById('generate-3d-btn');
 const resultBox = document.getElementById('generate-result');
 const resultPreview = document.getElementById('result-preview');
@@ -336,6 +337,11 @@ const resultStatus = document.getElementById('result-status');
 const resultLog = document.getElementById('result-log');
 const resultModel = document.getElementById('result-model');
 const spriteSelect = document.getElementById('sprite-select');
+
+// Stored after Generate 2D succeeds, consumed by Generate 3D.
+// finalDisplayUrl is what the user sees; imageUrlFor3D is a backend-served
+// URL of that same composite (so Meshy can fetch via data URL on backend).
+let lastTwoDResult = null;
 
 // Populate the base-model dropdown from backend's /api/sprites
 (async () => {
@@ -607,13 +613,16 @@ async function compositeBaseAndModelOutput(baseData, maskData, modelOutputUrl) {
   });
 }
 
-generate3dBtn.addEventListener('click', async () => {
+// ---- Generate 2D: canvas → AWS Bedrock 2D → composite preview ----
+generate2dBtn.addEventListener('click', async () => {
+  generate2dBtn.disabled = true;
   generate3dBtn.disabled = true;
   resultBox.style.display = 'block';
   resultLog.innerHTML = '';
   resultModel.innerHTML = '';
   resultProgressFill.style.width = '0%';
   resultStatus.textContent = 'exporting…';
+  lastTwoDResult = null;
 
   const prompt = document.getElementById('prompt-input').value.trim() || undefined;
 
@@ -632,11 +641,8 @@ generate3dBtn.addEventListener('click', async () => {
       const rawBbox = computeMaskBbox(maskData);
       const bbox = padBbox(rawBbox, canvas.width, canvas.height, 24);
 
-      // ---- Attempt 1: real Stability Inpaint on the full base + mask.
-      // Best result when not filtered: model uses surrounding photo context
-      // to render the prompt naturally inside the masked area.
+      // Attempt 1: real Stability Inpaint with surrounding photo context.
       let inpaintResult = null;
-      let inpaintFiltered = false;
       try {
         const baseFile = await imageDataToFile(baseImageData, 'base.png');
         const maskFile = await imageDataToFile(maskData, 'mask.png');
@@ -656,15 +662,12 @@ generate3dBtn.addEventListener('click', async () => {
         logLine(`inpaint ready → ${inpaintResult.imageUrl}`);
       } catch (err) {
         const msg = err.message || String(err);
-        // Backend returns 502 with "safety filter" when Stability rejects input
-        inpaintFiltered = /safety filter|filter/i.test(msg);
+        const inpaintFiltered = /safety filter|filter/i.test(msg);
         if (!inpaintFiltered) throw err;
         logLine('⚠ Stability filter blocked the photo — switching to crop+sketch fallback');
       }
 
       if (inpaintResult) {
-        // True inpaint: composite to guarantee photo stays exact outside mask
-        // (in practice it already does, this is a safety belt).
         resultStatus.textContent = 'compositing…';
         finalDisplayUrl = await compositeBaseAndModelOutput(
           baseImageData,
@@ -672,9 +675,7 @@ generate3dBtn.addEventListener('click', async () => {
           inpaintResult.imageUrl,
         );
       } else {
-        // ---- Attempt 2: crop the doodle onto white, run Control Sketch, paste back.
-        // Photo never leaves the renderer, so the safety filter is bypassed.
-        // Looks more "stamped" than real inpaint but at least follows the prompt.
+        // Attempt 2: crop the doodle onto white, control-sketch, paste back.
         logLine(`drawing bbox: ${bbox.w}×${bbox.h} at (${bbox.x}, ${bbox.y})`);
         const rawSketch = extractDoodleAsSketch(currentData, maskData, bbox);
         const sketchCanvas = ensureMinImageSize(rawSketch, 256);
@@ -720,34 +721,56 @@ generate3dBtn.addEventListener('click', async () => {
     }
 
     resultPreview.src = finalDisplayUrl;
+    resultProgressFill.style.width = '100%';
+    resultStatus.textContent = '2D ready — review then click Generate 3D';
+    logLine('✓ 2D ready — review the preview, tweak the prompt, or click Generate 3D when satisfied');
 
-    // 4. Image-to-3D via Meshy. Backend needs a backend-hosted URL,
-    // so if our composited result is a blob: URL, upload it first.
-    resultStatus.textContent = 'starting 3D (Meshy)…';
+    // Persist for the 3D step. If it's a blob: URL, also upload to backend
+    // now so Meshy can fetch it later.
     let imageUrlFor3D = finalDisplayUrl;
     if (imageUrlFor3D.startsWith('blob:')) {
       const compositeBlob = await fetch(imageUrlFor3D).then((r) => r.blob());
       const compositeFile = new File([compositeBlob], 'composite.png', { type: 'image/png' });
       const upComposite = await uploadImage(compositeFile, `${BACKEND_URL}/api/upload-image`);
       imageUrlFor3D = upComposite.imageUrl;
-      logLine(`uploaded composite → ${imageUrlFor3D}`);
     }
+    lastTwoDResult = { finalDisplayUrl, imageUrlFor3D, prompt: prompt || '' };
+    generate3dBtn.disabled = false;
+  } catch (err) {
+    resultStatus.textContent = 'failed';
+    logLine(`❌ ${err.message || err}`);
+    console.error(err);
+  } finally {
+    generate2dBtn.disabled = false;
+  }
+});
 
+// ---- Generate 3D: send last 2D result to Meshy image-to-3D ----
+generate3dBtn.addEventListener('click', async () => {
+  if (!lastTwoDResult) {
+    logLine('no 2D image yet — click Generate 2D first');
+    return;
+  }
+  generate3dBtn.disabled = true;
+  generate2dBtn.disabled = true;
+  resultProgressFill.style.width = '0%';
+  resultModel.innerHTML = '';
+  resultStatus.textContent = 'starting 3D (Meshy)…';
+
+  try {
     const provider = new BackendThreeDProvider({ baseUrl: BACKEND_URL });
     const baseSprite = spriteSelect.value || null;
     if (baseSprite) {
       logLine(`will merge into base sprite: ${baseSprite}`);
     }
     const started = await provider.startGeneration({
-      imageUrl: imageUrlFor3D,
-      prompt,
+      imageUrl: lastTwoDResult.imageUrlFor3D,
+      prompt: lastTwoDResult.prompt || undefined,
       mode: 'object',
-      // Forwarded to backend; merging happens in Pass 2.
       baseSprite,
     });
     logLine(`3D job started: ${started.jobId} (Meshy can take 1–3 min)`);
 
-    // 5. Poll Meshy until completed (longer interval — image-to-3D is slow)
     const result = await pollThreeDGeneration({
       provider,
       jobId: started.jobId,
@@ -776,5 +799,6 @@ generate3dBtn.addEventListener('click', async () => {
     console.error(err);
   } finally {
     generate3dBtn.disabled = false;
+    generate2dBtn.disabled = false;
   }
 });

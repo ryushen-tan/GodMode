@@ -320,7 +320,7 @@ app.post('/api/3d/start', async (req, res) => {
       headers: meshyHeaders(),
       body: JSON.stringify({
         image_url: dataUrl,
-        ai_model: 'meshy-4',
+        ai_model: 'meshy-6',
         topology: 'triangle',
         target_polycount: 30000,
         should_remesh: true,
