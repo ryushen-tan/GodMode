@@ -83,12 +83,17 @@ closePanelBtn.addEventListener('click', togglePanel);
 // ============================================================================
 
 const exportToRedditBtn = document.getElementById('export-to-reddit-btn');
+const REDDIT_UPLOAD_SUBREDDIT = 'SOONHACKATHONTESTING';
+
+exportToRedditBtn.addEventListener('mouseenter', () => setPassthrough(false));
+exportToRedditBtn.addEventListener('mouseleave', () => setPassthrough(true));
 
 exportToRedditBtn.addEventListener('click', async () => {
   if (exportToRedditBtn.classList.contains('posting')) return;
 
   try {
     exportToRedditBtn.classList.add('posting');
+    exportToRedditBtn.disabled = true;
     exportToRedditBtn.title = 'Capturing screenshot...';
 
     // Request screenshot from Electron main process
@@ -100,28 +105,7 @@ exportToRedditBtn.addEventListener('click', async () => {
     }
 
     const blob = await (await fetch(screenshot)).blob();
-
-    // Prompt for post title
-    const postTitle = prompt(
-      'Post title:',
-      'Check out my game! Made with GodMode 🎮'
-    );
-
-    if (postTitle === null) {
-      // User cancelled
-      return;
-    }
-
-    // Prompt for subreddit
-    const subreddit = prompt(
-      'Subreddit (without r/):',
-      'SOONHackathonTesting'
-    );
-
-    if (subreddit === null) {
-      // User cancelled
-      return;
-    }
+    const postTitle = `GodMode screenshot ${new Date().toLocaleString()}`;
 
     exportToRedditBtn.title = 'Posting to Reddit...';
 
@@ -129,7 +113,7 @@ exportToRedditBtn.addEventListener('click', async () => {
     const formData = new FormData();
     formData.append('screenshot', blob, 'game-screenshot.png');
     formData.append('title', postTitle);
-    formData.append('subreddit', subreddit);
+    formData.append('subreddit', REDDIT_UPLOAD_SUBREDDIT);
 
     const response = await fetch(`${BACKEND_URL}/api/reddit/post`, {
       method: 'POST',
@@ -143,7 +127,7 @@ exportToRedditBtn.addEventListener('click', async () => {
     }
 
     // Show success
-    alert(`✅ Posted to r/${subreddit}!\n\nView at: ${result.url || 'Reddit'}`);
+    alert(`Posted to r/${REDDIT_UPLOAD_SUBREDDIT}!\n\nView at: ${result.url || 'Reddit'}`);
     exportToRedditBtn.title = 'Posted successfully!';
     
     // Open post in browser
@@ -157,6 +141,7 @@ exportToRedditBtn.addEventListener('click', async () => {
     exportToRedditBtn.title = 'Export screenshot to Reddit';
   } finally {
     exportToRedditBtn.classList.remove('posting');
+    exportToRedditBtn.disabled = false;
     setTimeout(() => {
       exportToRedditBtn.title = 'Export screenshot to Reddit';
     }, 3000);

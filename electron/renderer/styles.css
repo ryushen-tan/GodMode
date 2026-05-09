@@ -46,6 +46,7 @@ body {
 .export-reddit-btn.posting {
   opacity: 0.6;
   cursor: not-allowed;
+  pointer-events: none;
   animation: pulse-reddit 1.5s infinite;
 }
 
