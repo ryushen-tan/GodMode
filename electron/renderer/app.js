@@ -343,6 +343,26 @@ const spriteSelect = document.getElementById('sprite-select');
 // URL of that same composite (so Meshy can fetch via data URL on backend).
 let lastTwoDResult = null;
 
+// Smooth fake progress while waiting on a non-streaming op (Bedrock 2D).
+// Asymptotically approaches `cap` so the bar always feels alive, never
+// pretends to finish. Caller flips to 100% on real completion.
+let progressTimer = null;
+function startSyntheticProgress(cap = 90) {
+  stopSyntheticProgress();
+  let pct = 0;
+  resultProgressFill.style.width = '0%';
+  progressTimer = setInterval(() => {
+    pct += (cap - pct) * 0.06;
+    resultProgressFill.style.width = pct.toFixed(1) + '%';
+  }, 120);
+}
+function stopSyntheticProgress() {
+  if (progressTimer) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
+}
+
 // Populate the base-model dropdown from backend's /api/sprites
 (async () => {
   try {
@@ -620,9 +640,9 @@ generate2dBtn.addEventListener('click', async () => {
   resultBox.style.display = 'block';
   resultLog.innerHTML = '';
   resultModel.innerHTML = '';
-  resultProgressFill.style.width = '0%';
   resultStatus.textContent = 'exporting…';
   lastTwoDResult = null;
+  startSyntheticProgress(90);
 
   const prompt = document.getElementById('prompt-input').value.trim() || undefined;
 
@@ -721,6 +741,7 @@ generate2dBtn.addEventListener('click', async () => {
     }
 
     resultPreview.src = finalDisplayUrl;
+    stopSyntheticProgress();
     resultProgressFill.style.width = '100%';
     resultStatus.textContent = '2D ready — review then click Generate 3D';
     logLine('✓ 2D ready — review the preview, tweak the prompt, or click Generate 3D when satisfied');
@@ -737,10 +758,12 @@ generate2dBtn.addEventListener('click', async () => {
     lastTwoDResult = { finalDisplayUrl, imageUrlFor3D, prompt: prompt || '' };
     generate3dBtn.disabled = false;
   } catch (err) {
+    stopSyntheticProgress();
     resultStatus.textContent = 'failed';
     logLine(`❌ ${err.message || err}`);
     console.error(err);
   } finally {
+    stopSyntheticProgress();
     generate2dBtn.disabled = false;
   }
 });
