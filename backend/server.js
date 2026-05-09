@@ -77,7 +77,6 @@ const SPRITES_DIR = path.join(
 
 app.get('/api/sprites', (_req, res) => {
   try {
-    const fs = require('fs');
     const files = fs
       .readdirSync(SPRITES_DIR)
       .filter((f) => f.toLowerCase().endsWith('.glb'))
@@ -88,9 +87,52 @@ app.get('/api/sprites', (_req, res) => {
   }
 });
 
+// Diagnostic: open a sprite with gltf-transform and report what was loaded.
+// Lets us verify the base GLB is actually being parsed correctly before we
+// try to merge anything into it.
+app.get('/api/sprites/:name/inspect', async (req, res) => {
+  const name = req.params.name;
+  const full = path.join(SPRITES_DIR, name);
+  if (!fs.existsSync(full)) return res.status(404).json({ error: 'not found' });
+  try {
+    const io = new NodeIO()
+      .registerExtensions(ALL_EXTENSIONS)
+      .registerDependencies({
+        'draco3d.decoder': await draco3d.createDecoderModule(),
+        'draco3d.encoder': await draco3d.createEncoderModule(),
+      });
+    const doc = await io.read(full);
+    const root = doc.getRoot();
+    const scenes = root.listScenes();
+    const meshes = root.listMeshes();
+    const materials = root.listMaterials();
+    const textures = root.listTextures();
+    const totalVertices = meshes.reduce((sum, m) => {
+      return sum + m.listPrimitives().reduce((s, p) => {
+        const pos = p.getAttribute('POSITION');
+        return s + (pos ? pos.getCount() : 0);
+      }, 0);
+    }, 0);
+    res.json({
+      name,
+      fileSize: fs.statSync(full).size,
+      scenes: scenes.length,
+      meshes: meshes.length,
+      materials: materials.length,
+      textures: textures.length,
+      totalVertices,
+      bounds: doc.getRoot().listScenes()[0]
+        ? bounds(doc.getRoot().listScenes()[0])
+        : null,
+      extensions: root.listExtensionsUsed().map((e) => e.extensionName),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
 // Serve the original sprite GLBs (so the renderer can preview them)
 app.get('/sprites/:name', (req, res) => {
-  const fs = require('fs');
   const name = req.params.name;
   if (!name.toLowerCase().endsWith('.glb')) return res.status(400).end();
   const full = path.join(SPRITES_DIR, name);
