@@ -1,5 +1,7 @@
 export type Generate2DRequest = {
   imageUrl: string;
+  /** Optional mask: inpaint mode regenerates only mask pixels, leaves rest exact. */
+  maskUrl?: string;
   prompt?: string;
 };
 

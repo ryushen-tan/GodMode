@@ -102,9 +102,10 @@ app.post('/api/upload-image', upload.single('image'), (req, res) => {
   res.json({ imageUrl: publicImageUrl(id), id });
 });
 
-// Bedrock Nova Canvas: sketch -> polished 2D image (CANNY_EDGE conditioning)
+// Bedrock Stability: sketch -> polished image (control models) OR
+// base + mask + prompt -> inpainted image (inpaint model, when maskUrl is provided).
 app.post('/api/generate-2d', async (req, res) => {
-  const { imageUrl, prompt } = req.body || {};
+  const { imageUrl, maskUrl, prompt } = req.body || {};
   if (!imageUrl) return res.status(400).json({ error: 'imageUrl required' });
 
   const id = imageIdFromUrl(imageUrl);
@@ -113,30 +114,56 @@ app.post('/api/generate-2d', async (req, res) => {
   const stored = images.get(id);
   if (!stored) return res.status(404).json({ error: 'image not found' });
 
-  // Pure image-to-image: Stability's Control Sketch interprets the drawing directly.
-  // The prompt only nudges style; the sketch is what defines the subject and shape.
+  // Optional mask for inpainting mode
+  let maskStored = null;
+  if (maskUrl) {
+    const maskId = imageIdFromUrl(maskUrl);
+    if (maskId) maskStored = images.get(maskId) || null;
+  }
+
+  // Image-to-image preserving structure: Control Structure (or Control Sketch)
+  // uses the input image's edges/composition as a tight constraint, so the
+  // base photo stays recognizable while user-added strokes get rendered cleanly.
   const userPrompt = (prompt && prompt.trim()) || '';
   const text = userPrompt
-    ? `${userPrompt}, polished clean illustration, well-lit, white background`
-    : 'polished clean illustration, well-lit, white background';
+    ? `${userPrompt}, photorealistic, high quality, preserve original details`
+    : 'photorealistic, high quality, preserve original details, refined edges';
 
   const inputB64 = stored.buffer.toString('base64');
 
   // Build request body based on model family. Bedrock model APIs differ.
   // Inference profile IDs like `us.stability.*` route to a stability model.
-  const stripped = MODEL_ID.replace(/^us\.|^eu\.|^apac\./, '');
-  const isStabilityControlSketch = stripped.includes('stable-image-control-sketch');
+  const INPAINT_MODEL_ID = 'us.stability.stable-image-inpaint-v1:0';
+  const useInpaint = !!maskStored;
+  const effectiveModelId = useInpaint ? INPAINT_MODEL_ID : MODEL_ID;
+  const stripped = effectiveModelId.replace(/^us\.|^eu\.|^apac\./, '');
+  const isStabilityInpaint = stripped.includes('stable-image-inpaint');
+  const isStabilityControl =
+    stripped.includes('stable-image-control-sketch') ||
+    stripped.includes('stable-image-control-structure');
   const isStability = stripped.startsWith('stability.');
   const isAmazon = stripped.startsWith('amazon.');
 
   let body;
-  if (isStabilityControlSketch) {
-    // Stability Image Services - Control Sketch (sketch -> polished image).
-    // High control_strength = output follows the sketch's shapes/edges tightly.
+  if (isStabilityInpaint) {
+    // Stability Inpaint: regenerates ONLY the white/non-zero areas of the mask,
+    // leaving the rest of the input image pixel-perfect identical.
     body = {
       prompt: text,
       image: inputB64,
-      control_strength: 0.9,
+      mask: maskStored.buffer.toString('base64'),
+      output_format: 'png',
+      seed: Math.floor(Math.random() * 1_000_000),
+    };
+  } else if (isStabilityControl) {
+    // Stability Control Sketch / Structure: input image is a tight guide;
+    // higher control_strength = output stays closer to the input's edges
+    // and composition. 0.85 keeps the base photo recognizable while still
+    // letting the model clean up rough strokes drawn on top.
+    body = {
+      prompt: text,
+      image: inputB64,
+      control_strength: 0.85,
       output_format: 'png',
       seed: Math.floor(Math.random() * 1_000_000),
     };
@@ -176,7 +203,7 @@ app.post('/api/generate-2d', async (req, res) => {
 
   try {
     const cmd = new InvokeModelCommand({
-      modelId: MODEL_ID,
+      modelId: effectiveModelId,
       contentType: 'application/json',
       accept: 'application/json',
       body: JSON.stringify(body),

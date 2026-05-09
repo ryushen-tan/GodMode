@@ -214,11 +214,14 @@ document.addEventListener('paste', async (e) => {
   }
 });
 
+// Most recent base image drawn to the canvas (used to compute inpaint mask).
+let baseImageData = null;
+
 fileInput.addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (file) {
     fileName.textContent = file.name;
-    
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
@@ -226,8 +229,12 @@ fileInput.addEventListener('change', (e) => {
         const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
         const x = (canvas.width - img.width * scale) / 2;
         const y = (canvas.height - img.height * scale) / 2;
-        
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+        // Snapshot the canvas exactly as the upload landed; this is what
+        // we feed to inpaint as the unmodified base image.
+        baseImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       };
       img.src = event.target.result;
     };
@@ -314,6 +321,64 @@ function logLine(text) {
   resultLog.scrollTop = resultLog.scrollHeight;
 }
 
+// Render an ImageData onto an offscreen canvas and return it as a PNG File.
+async function imageDataToFile(imageData, filename) {
+  const tmp = document.createElement('canvas');
+  tmp.width = imageData.width;
+  tmp.height = imageData.height;
+  tmp.getContext('2d').putImageData(imageData, 0, 0);
+  return new Promise((resolve) => {
+    tmp.toBlob((blob) => {
+      resolve(new File([blob], filename, { type: 'image/png' }));
+    }, 'image/png');
+  });
+}
+
+// Build an inpaint mask from base vs current pixels.
+// White (255) = "regenerate this pixel", black (0) = "preserve exactly".
+// dilatePx grows the mask outward so doodle edges blend smoothly.
+function computeInpaintMask(baseData, currentData, threshold = 25, dilatePx = 4) {
+  const w = baseData.width;
+  const h = baseData.height;
+  const out = new Uint8ClampedArray(w * h * 4);
+  // First pass: raw diff
+  const raw = new Uint8Array(w * h);
+  for (let i = 0, p = 0; i < baseData.data.length; i += 4, p++) {
+    const dr = Math.abs(baseData.data[i]     - currentData.data[i]);
+    const dg = Math.abs(baseData.data[i + 1] - currentData.data[i + 1]);
+    const db = Math.abs(baseData.data[i + 2] - currentData.data[i + 2]);
+    raw[p] = ((dr + dg + db) / 3) > threshold ? 1 : 0;
+  }
+  // Second pass: dilate (square kernel)
+  const dilated = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let on = 0;
+      for (let dy = -dilatePx; dy <= dilatePx && !on; dy++) {
+        for (let dx = -dilatePx; dx <= dilatePx && !on; dx++) {
+          const ny = y + dy, nx = x + dx;
+          if (ny >= 0 && ny < h && nx >= 0 && nx < w && raw[ny * w + nx]) on = 1;
+        }
+      }
+      dilated[y * w + x] = on;
+    }
+  }
+  // Pack into RGBA (white where 1, black where 0, alpha 255)
+  for (let p = 0, i = 0; p < dilated.length; p++, i += 4) {
+    const v = dilated[p] * 255;
+    out[i] = v; out[i + 1] = v; out[i + 2] = v; out[i + 3] = 255;
+  }
+  return new ImageData(out, w, h);
+}
+
+function maskHasContent(maskImageData) {
+  const d = maskImageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i] > 0) return true;
+  }
+  return false;
+}
+
 generate3dBtn.addEventListener('click', async () => {
   generate3dBtn.disabled = true;
   resultBox.style.display = 'block';
@@ -325,21 +390,59 @@ generate3dBtn.addEventListener('click', async () => {
   const prompt = document.getElementById('prompt-input').value.trim() || undefined;
 
   try {
-    // 1. Export canvas → PNG file
-    const file = await exportCanvasToFile(canvas, 'sketch.png');
-    logLine(`exported ${file.name} (${file.size} bytes)`);
-    resultPreview.src = URL.createObjectURL(file);
+    let imageUrlForBackend;
+    let maskUrlForBackend;
 
-    // 2. Upload to backend
-    resultStatus.textContent = 'uploading…';
-    const uploaded = await uploadImage(file, `${BACKEND_URL}/api/upload-image`);
-    logLine(`uploaded → ${uploaded.imageUrl}`);
+    if (baseImageData) {
+      // Inpaint mode: send the unmodified base image + a mask of just the
+      // pixels you drew. Stability Inpaint regenerates only inside the mask
+      // and leaves the rest of the photo pixel-perfect.
+      const currentData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const maskData = computeInpaintMask(baseImageData, currentData);
 
-    // 3. AWS Bedrock Stability Control Sketch: pure image-to-image
-    resultStatus.textContent = 'generating 2D (AWS Bedrock)…';
-    logLine('calling AWS Bedrock (Stability Control Sketch, image-to-image)…');
+      if (!maskHasContent(maskData)) {
+        // Nothing was drawn on top of the base — nothing to inpaint
+        logLine('no strokes detected on top of the uploaded image. Draw something first.');
+        resultStatus.textContent = 'idle';
+        return;
+      }
+
+      const baseFile = await imageDataToFile(baseImageData, 'base.png');
+      const maskFile = await imageDataToFile(maskData, 'mask.png');
+      logLine(`base ${baseFile.size}b, mask ${maskFile.size}b`);
+      resultPreview.src = URL.createObjectURL(baseFile);
+
+      resultStatus.textContent = 'uploading…';
+      const baseUp = await uploadImage(baseFile, `${BACKEND_URL}/api/upload-image`);
+      const maskUp = await uploadImage(maskFile, `${BACKEND_URL}/api/upload-image`);
+      logLine(`base → ${baseUp.imageUrl}`);
+      logLine(`mask → ${maskUp.imageUrl}`);
+      imageUrlForBackend = baseUp.imageUrl;
+      maskUrlForBackend = maskUp.imageUrl;
+
+      resultStatus.textContent = 'inpainting (AWS Bedrock)…';
+      logLine('calling AWS Bedrock (Stability Inpaint, mask-only regeneration)…');
+    } else {
+      // No base image uploaded — fall back to the regular control-model flow
+      const file = await exportCanvasToFile(canvas, 'sketch.png');
+      logLine(`exported ${file.name} (${file.size} bytes)`);
+      resultPreview.src = URL.createObjectURL(file);
+
+      resultStatus.textContent = 'uploading…';
+      const uploaded = await uploadImage(file, `${BACKEND_URL}/api/upload-image`);
+      logLine(`uploaded → ${uploaded.imageUrl}`);
+      imageUrlForBackend = uploaded.imageUrl;
+
+      resultStatus.textContent = 'generating 2D (AWS Bedrock)…';
+      logLine('calling AWS Bedrock (Stability Control, structure-preserving)…');
+    }
+
     const enhanced = await generate2D(
-      { imageUrl: uploaded.imageUrl, prompt },
+      {
+        imageUrl: imageUrlForBackend,
+        ...(maskUrlForBackend ? { maskUrl: maskUrlForBackend } : {}),
+        prompt,
+      },
       `${BACKEND_URL}/api/generate-2d`,
     );
     logLine(`2D ready → ${enhanced.imageUrl}`);
