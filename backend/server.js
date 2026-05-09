@@ -49,6 +49,8 @@ const MODEL_ID = process.env.BEDROCK_IMAGE_MODEL_ID || 'amazon.nova-canvas-v1:0'
 const VISION_MODEL_ID = process.env.BEDROCK_VISION_MODEL_ID || 'us.anthropic.claude-3-5-haiku-20241022-v1:0';
 const MESHY_API_KEY = process.env.MESHY_API_KEY || '';
 const MESHY_BASE = 'https://api.meshy.ai/openapi/v1';
+const STABILITY_API_KEY = process.env.STABILITY_API_KEY || '';
+const STABILITY_FAST_3D_URL = 'https://api.stability.ai/v2beta/3d/stable-fast-3d';
 
 tick(`config (port=${PORT}, region=${REGION})`);
 const bedrock = new BedrockRuntimeClient({ region: REGION }); tick('bedrock client');
@@ -668,8 +670,68 @@ app.post('/api/3d/start', async (req, res) => {
   }
 });
 
-// Persist merged GLBs in memory; serve via /merged/<id>.glb.
+// Persist merged/scaled GLBs in memory; serve via /merged/<id>.glb.
 const mergedGlbs = new Map(); // id -> Buffer
+
+// Stable Fast 3D: single synchronous call, ~3-5 second turnaround.
+// Returns the GLB URL directly (no polling, no jobId machinery).
+app.post('/api/3d/stable-fast', async (req, res) => {
+  const { imageUrl, baseSprite } = req.body || {};
+  if (!imageUrl) return res.status(400).json({ error: 'imageUrl required' });
+  if (!STABILITY_API_KEY) {
+    return res.status(500).json({ error: 'STABILITY_API_KEY missing in .env' });
+  }
+
+  const id = imageIdFromUrl(imageUrl);
+  if (!id) return res.status(400).json({ error: 'unsupported imageUrl (must be from /images/)' });
+  const stored = images.get(id);
+  if (!stored) return res.status(404).json({ error: 'image not found' });
+
+  const startedAt = Date.now();
+  try {
+    const form = new FormData();
+    form.append('image', new Blob([stored.buffer], { type: stored.mime || 'image/png' }), 'input.png');
+
+    const stRes = await fetch(STABILITY_FAST_3D_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${STABILITY_API_KEY}`,
+        Accept: 'model/gltf-binary',
+      },
+      body: form,
+    });
+    if (!stRes.ok) {
+      const text = await stRes.text().catch(() => '');
+      return res.status(502).json({ error: `Stability ${stRes.status}`, detail: text });
+    }
+    let glbBuf = Buffer.from(await stRes.arrayBuffer());
+
+    // Optional: rescale to base sprite dimensions
+    if (baseSprite) {
+      const basePath = path.join(SPRITES_DIR, baseSprite);
+      if (fs.existsSync(basePath)) {
+        try {
+          glbBuf = await scaleGlbToMatchBase(glbBuf, basePath);
+        } catch (err) {
+          console.warn('[stable-fast] scale failed:', err.message);
+        }
+      }
+    }
+
+    const outId = `sf3d-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+    mergedGlbs.set(outId, glbBuf);
+    const elapsedMs = Date.now() - startedAt;
+    console.log(`[stable-fast] ${elapsedMs}ms, ${glbBuf.length} bytes`);
+    res.json({
+      modelUrl: `${baseUrl()}/merged/${outId}.glb`,
+      elapsedMs,
+      format: 'glb',
+    });
+  } catch (err) {
+    console.error('[stable-fast] error:', err);
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
 
 app.get('/merged/:id', (req, res) => {
   const buf = mergedGlbs.get(req.params.id);

@@ -343,6 +343,7 @@ const resultStatus = document.getElementById('result-status');
 const resultLog = document.getElementById('result-log');
 const resultModel = document.getElementById('result-model');
 const spriteSelect = document.getElementById('sprite-select');
+const providerSelect = document.getElementById('provider-select');
 
 // Stored after Generate 2D succeeds, consumed by Generate 3D.
 // finalDisplayUrl is what the user sees; imageUrlFor3D is a backend-served
@@ -840,7 +841,7 @@ generate2dBtn.addEventListener('click', async () => {
   }
 });
 
-// ---- Generate 3D: send last 2D result to Meshy image-to-3D ----
+// ---- Generate 3D: branch on provider ----
 generate3dBtn.addEventListener('click', async () => {
   if (!lastTwoDResult) {
     logLine('no 2D image yet — click Generate 2D first');
@@ -850,59 +851,89 @@ generate3dBtn.addEventListener('click', async () => {
   generate2dBtn.disabled = true;
   resultProgressFill.style.width = '0%';
   resultModel.innerHTML = '';
-  resultStatus.textContent = 'starting 3D (Meshy)…';
+
+  const provider = providerSelect.value || 'stable-fast';
+  const baseSprite = spriteSelect.value || null;
 
   try {
-    const provider = new BackendThreeDProvider({ baseUrl: BACKEND_URL });
-    const baseSprite = spriteSelect.value || null;
-    if (baseSprite) {
-      logLine(`will scale Meshy output to match ${baseSprite}'s dimensions`);
+    if (provider === 'stable-fast') {
+      // Single synchronous call to backend → Stability Stable Fast 3D.
+      // Typical turnaround: 3–5 seconds end-to-end.
+      resultStatus.textContent = 'generating 3D (Stable Fast 3D)…';
+      logLine('calling Stability Stable Fast 3D…');
+      startSyntheticProgress(95);
+
+      const resp = await fetch(`${BACKEND_URL}/api/3d/stable-fast`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageUrl: lastTwoDResult.imageUrlFor3D,
+          ...(baseSprite ? { baseSprite } : {}),
+        }),
+      });
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(`Stable Fast 3D ${resp.status}: ${text.slice(0, 200)}`);
+      }
+      const json = await resp.json();
+      stopSyntheticProgress();
+      resultProgressFill.style.width = '100%';
+      resultStatus.textContent = 'completed';
+      logLine(`✅ 3D done in ${json.elapsedMs}ms (${json.format})`);
+
+      const viewer = document.getElementById('result-glb-viewer');
+      if (viewer) {
+        viewer.src = json.modelUrl;
+        viewer.style.display = 'block';
+      }
+      resultModel.innerHTML =
+        `<div class="result-label">3D Model (Stable Fast 3D, ${json.elapsedMs}ms)</div>` +
+        `<a href="${json.modelUrl}" target="_blank" rel="noreferrer" download>Download .glb</a>`;
+    } else {
+      // Meshy: queue + poll
+      resultStatus.textContent = 'starting 3D (Meshy)…';
+      if (baseSprite) {
+        logLine(`will scale Meshy output to match ${baseSprite}'s dimensions`);
+      }
+      const meshyProvider = new BackendThreeDProvider({ baseUrl: BACKEND_URL });
+      const started = await meshyProvider.startGeneration({
+        imageUrl: lastTwoDResult.imageUrlFor3D,
+        prompt: lastTwoDResult.prompt || undefined,
+        mode: 'object',
+        ...(baseSprite ? { baseSprite, scaleOnly: true } : {}),
+      });
+      logLine(`Meshy job started: ${started.jobId} (1–3 min)`);
+
+      const result = await pollThreeDGeneration({
+        provider: meshyProvider,
+        jobId: started.jobId,
+        intervalMs: 2500,
+        timeoutMs: 5 * 60 * 1000,
+        onProgress: (job) => {
+          resultStatus.textContent = job.status;
+          if (typeof job.progress === 'number') {
+            resultProgressFill.style.width = job.progress + '%';
+            logLine(`poll: ${job.status} ${job.progress}%`);
+          } else {
+            logLine(`poll: ${job.status}`);
+          }
+        },
+      });
+      resultProgressFill.style.width = '100%';
+      resultStatus.textContent = 'completed';
+      logLine(`✅ 3D done (${result.format})`);
+
+      const viewer = document.getElementById('result-glb-viewer');
+      if (viewer) {
+        viewer.src = result.modelUrl;
+        viewer.style.display = 'block';
+      }
+      resultModel.innerHTML =
+        `<div class="result-label">3D Model (Meshy)</div>` +
+        `<a href="${result.modelUrl}" target="_blank" rel="noreferrer" download>Download .glb</a>`;
     }
-    const started = await provider.startGeneration({
-      imageUrl: lastTwoDResult.imageUrlFor3D,
-      prompt: lastTwoDResult.prompt || undefined,
-      mode: 'object',
-      // baseSprite is used for SIZING only — Meshy generates from the full
-      // composite (your photo + drawing), then backend rescales to match
-      // the chosen game asset's bounding box.
-      ...(baseSprite ? { baseSprite, scaleOnly: true } : {}),
-    });
-    logLine(`3D job started: ${started.jobId} (Meshy can take 1–3 min)`);
-
-    const result = await pollThreeDGeneration({
-      provider,
-      jobId: started.jobId,
-      // Tighter polling = we notice completion sooner. Meshy's status
-      // endpoint is cheap; this just trims the "done but not yet shown"
-      // tail.
-      intervalMs: 2500,
-      timeoutMs: 5 * 60 * 1000,
-      onProgress: (job) => {
-        resultStatus.textContent = job.status;
-        if (typeof job.progress === 'number') {
-          resultProgressFill.style.width = job.progress + '%';
-          logLine(`poll: ${job.status} ${job.progress}%`);
-        } else {
-          logLine(`poll: ${job.status}`);
-        }
-      },
-    });
-
-    resultProgressFill.style.width = '100%';
-    resultStatus.textContent = 'completed';
-    logLine(`✅ 3D done (${result.format})`);
-
-    // Show the GLB inline in the panel
-    const viewer = document.getElementById('result-glb-viewer');
-    if (viewer) {
-      viewer.src = result.modelUrl;
-      viewer.style.display = 'block';
-    }
-
-    resultModel.innerHTML =
-      `<div class="result-label">3D Model (Meshy)</div>` +
-      `<a href="${result.modelUrl}" target="_blank" rel="noreferrer" download>Download .glb</a>`;
   } catch (err) {
+    stopSyntheticProgress();
     resultStatus.textContent = 'failed';
     logLine(`❌ ${err.message || err}`);
     console.error(err);
