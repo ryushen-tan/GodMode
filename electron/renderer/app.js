@@ -962,30 +962,39 @@ generate3dBtn.addEventListener('click', async () => {
   const baseSprite = spriteSelect.value || null;
 
   try {
-    if (provider === 'stable-fast') {
-      // Single synchronous call to backend → Stability Stable Fast 3D.
-      // Typical turnaround: 3–5 seconds end-to-end.
-      resultStatus.textContent = 'preparing image…';
-      // Subtle blur + size floor before Stable Fast 3D — smooths surface
-      // noise the model would otherwise reproduce as bumpy geometry.
-      const upscaledUrl = await ensureImageMinSize(lastTwoDResult.imageUrlFor3D, 640, 1.5);
-      logLine('prepped image (smoothing + size floor) for Stable Fast 3D');
+    if (provider === 'stable-fast' || provider === 'triposr') {
+      const isStableFast = provider === 'stable-fast';
+      const label = isStableFast ? 'Stable Fast 3D' : 'TripoSR (AWS)';
+      const endpoint = isStableFast ? '/api/3d/stable-fast' : '/api/3d/triposr';
 
-      resultStatus.textContent = 'generating 3D (Stable Fast 3D)…';
-      logLine('calling Stability Stable Fast 3D…');
+      resultStatus.textContent = 'preparing image…';
+      // Stable Fast 3D needs >=640px and benefits from a slight blur to
+      // suppress noise -> smoother mesh. TripoSR has no min size, but the
+      // blur still helps because it removes single-pixel artifacts that
+      // would otherwise become bumps. 640 is a no-op floor at our 1024
+      // canvas; blur is the meaningful step.
+      const preppedUrl = await ensureImageMinSize(
+        lastTwoDResult.imageUrlFor3D,
+        640,
+        isStableFast ? 1.5 : 0.8,
+      );
+      logLine(`prepped image for ${label}`);
+
+      resultStatus.textContent = `generating 3D (${label})…`;
+      logLine(`calling ${label}…`);
       startSyntheticProgress(95);
 
-      const resp = await fetch(`${BACKEND_URL}/api/3d/stable-fast`, {
+      const resp = await fetch(`${BACKEND_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          imageUrl: upscaledUrl,
+          imageUrl: preppedUrl,
           ...(baseSprite ? { baseSprite } : {}),
         }),
       });
       if (!resp.ok) {
         const text = await resp.text().catch(() => '');
-        throw new Error(`Stable Fast 3D ${resp.status}: ${text.slice(0, 200)}`);
+        throw new Error(`${label} ${resp.status}: ${text.slice(0, 200)}`);
       }
       const json = await resp.json();
       stopSyntheticProgress();
@@ -999,7 +1008,7 @@ generate3dBtn.addEventListener('click', async () => {
         viewer.style.display = 'block';
       }
       resultModel.innerHTML =
-        `<div class="result-label">3D Model (Stable Fast 3D, ${json.elapsedMs}ms)</div>` +
+        `<div class="result-label">3D Model (${label}, ${json.elapsedMs}ms)</div>` +
         `<a href="${json.modelUrl}" target="_blank" rel="noreferrer" download>Download .glb</a>`;
     } else {
       // Meshy: queue + poll

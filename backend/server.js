@@ -51,6 +51,7 @@ const MESHY_API_KEY = process.env.MESHY_API_KEY || '';
 const MESHY_BASE = 'https://api.meshy.ai/openapi/v1';
 const STABILITY_API_KEY = process.env.STABILITY_API_KEY || '';
 const STABILITY_FAST_3D_URL = 'https://api.stability.ai/v2beta/3d/stable-fast-3d';
+const TRIPOSR_URL = (process.env.TRIPOSR_URL || '').replace(/\/+$/, '');
 
 tick(`config (port=${PORT}, region=${REGION})`);
 const bedrock = new BedrockRuntimeClient({ region: REGION }); tick('bedrock client');
@@ -734,6 +735,61 @@ app.post('/api/3d/stable-fast', async (req, res) => {
     });
   } catch (err) {
     console.error('[stable-fast] error:', err);
+    res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+// TripoSR running on a user-provided AWS EC2 GPU instance (Flask server
+// from scripts/triposr_server.py). Sync POST, returns GLB in 3-8s after
+// the model is warm.
+app.post('/api/3d/triposr', async (req, res) => {
+  const { imageUrl, baseSprite } = req.body || {};
+  if (!imageUrl) return res.status(400).json({ error: 'imageUrl required' });
+  if (!TRIPOSR_URL) return res.status(500).json({ error: 'TRIPOSR_URL missing in .env' });
+
+  const id = imageIdFromUrl(imageUrl);
+  if (!id) return res.status(400).json({ error: 'unsupported imageUrl (must be from /images/)' });
+  const stored = images.get(id);
+  if (!stored) return res.status(404).json({ error: 'image not found' });
+
+  const startedAt = Date.now();
+  try {
+    const form = new FormData();
+    form.append('image', new Blob([stored.buffer], { type: stored.mime || 'image/png' }), 'input.png');
+
+    const tsRes = await fetch(`${TRIPOSR_URL}/generate`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!tsRes.ok) {
+      const text = await tsRes.text().catch(() => '');
+      return res.status(502).json({ error: `TripoSR ${tsRes.status}`, detail: text });
+    }
+    let glbBuf = Buffer.from(await tsRes.arrayBuffer());
+
+    if (baseSprite) {
+      const basePath = path.join(SPRITES_DIR, baseSprite);
+      if (fs.existsSync(basePath)) {
+        try {
+          glbBuf = await scaleGlbToMatchBase(glbBuf, basePath);
+        } catch (err) {
+          console.warn('[triposr] scale failed:', err.message);
+        }
+      }
+    }
+
+    const outId = `triposr-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+    mergedGlbs.set(outId, glbBuf);
+    const elapsedMs = Date.now() - startedAt;
+    const remoteMs = tsRes.headers.get('x-triposr-elapsed-ms');
+    console.log(`[triposr] total ${elapsedMs}ms (model ${remoteMs || '?'}ms), ${glbBuf.length} bytes`);
+    res.json({
+      modelUrl: `${baseUrl()}/merged/${outId}.glb`,
+      elapsedMs,
+      format: 'glb',
+    });
+  } catch (err) {
+    console.error('[triposr] error:', err);
     res.status(500).json({ error: err.message || String(err) });
   }
 });
