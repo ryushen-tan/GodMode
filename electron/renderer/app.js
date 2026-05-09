@@ -165,13 +165,15 @@ brushSize.addEventListener('input', (e) => {
 });
 
 clearCanvas.addEventListener('click', () => {
-  if (confirm('Clear the entire canvas?')) {
-    ctx.globalCompositeOperation = 'source-over';
+  if (!confirm('Clear your drawings?')) return;
+  ctx.globalCompositeOperation = 'source-over';
+  if (baseImageData) {
+    // Restore the uploaded photo as it was, removing only the strokes.
+    ctx.putImageData(baseImageData, 0, 0);
+  } else {
+    // No upload — wipe to solid white.
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    // Reset the upload state so the next Generate doesn't compare against
-    // a stale base image.
-    baseImageData = null;
     fileName.textContent = '';
   }
 });
