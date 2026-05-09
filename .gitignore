@@ -1,5 +1,8 @@
-# Created by https://www.toptal.com/developers/gitignore/api/nextjs,c,c++,godot,macos
+Created by https://www.toptal.com/developers/gitignore/api/nextjs,c,c++,godot,macos
 # Edit at https://www.toptal.com/developers/gitignore?templates=nextjs,c,c++,godot,macos
+
+### Godot
+example_game/*
 
 ### C ###
 # Prerequisites
