@@ -467,6 +467,36 @@ function maskHasContent(maskImageData) {
   return false;
 }
 
+// Stable Fast 3D rejects images smaller than 640px on either axis.
+// Upscale a backend-served image to >= minSize, upload the result,
+// return the new backend URL.
+async function ensureImageMinSize(imageUrl, minSize = 640) {
+  const img = await new Promise((resolve, reject) => {
+    const im = new Image();
+    im.crossOrigin = 'anonymous';
+    im.onload = () => resolve(im);
+    im.onerror = reject;
+    im.src = imageUrl;
+  });
+  if (img.width >= minSize && img.height >= minSize) return imageUrl;
+
+  const scale = Math.max(minSize / img.width, minSize / img.height);
+  const w = Math.ceil(img.width * scale);
+  const h = Math.ceil(img.height * scale);
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const cx = c.getContext('2d');
+  cx.imageSmoothingEnabled = true;
+  cx.imageSmoothingQuality = 'high';
+  cx.drawImage(img, 0, 0, w, h);
+
+  const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+  const file = new File([blob], 'upscaled.png', { type: 'image/png' });
+  const uploaded = await uploadImage(file, `${BACKEND_URL}/api/upload-image`);
+  return uploaded.imageUrl;
+}
+
 // Smallest axis-aligned bounding box around mask pixels (white = on).
 function computeMaskBbox(maskData) {
   const w = maskData.width;
@@ -859,6 +889,13 @@ generate3dBtn.addEventListener('click', async () => {
     if (provider === 'stable-fast') {
       // Single synchronous call to backend → Stability Stable Fast 3D.
       // Typical turnaround: 3–5 seconds end-to-end.
+      resultStatus.textContent = 'preparing image…';
+      // Stable Fast 3D requires >=640px; canvas is 400px so upscale first.
+      const upscaledUrl = await ensureImageMinSize(lastTwoDResult.imageUrlFor3D, 640);
+      if (upscaledUrl !== lastTwoDResult.imageUrlFor3D) {
+        logLine('upscaled image to 640+ for Stable Fast 3D');
+      }
+
       resultStatus.textContent = 'generating 3D (Stable Fast 3D)…';
       logLine('calling Stability Stable Fast 3D…');
       startSyntheticProgress(95);
@@ -867,7 +904,7 @@ generate3dBtn.addEventListener('click', async () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          imageUrl: lastTwoDResult.imageUrlFor3D,
+          imageUrl: upscaledUrl,
           ...(baseSprite ? { baseSprite } : {}),
         }),
       });
