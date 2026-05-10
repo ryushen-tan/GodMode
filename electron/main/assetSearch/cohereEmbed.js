@@ -1,4 +1,12 @@
-const { CohereClient } = require("cohere-ai");
+// cohere-ai's top-level require hangs under Electron 28's main process,
+// so we lazy-load it only when an embed call actually happens.
+let _CohereClient = null;
+function getCohereClient(token) {
+  if (!_CohereClient) {
+    _CohereClient = require("cohere-ai").CohereClient;
+  }
+  return new _CohereClient({ token });
+}
 
 function getRequiredEnv(name) {
   const v = process.env[name];
@@ -13,7 +21,7 @@ function bufferToDataUrlPng(buffer) {
 
 async function embedImageViaCohere({ imageBuffer, model = "embed-v4.0" }) {
   const apiKey = getRequiredEnv("COHERE_API_KEY");
-  const cohere = new CohereClient({ token: apiKey });
+  const cohere = getCohereClient(apiKey);
 
   const imageBase64 = bufferToDataUrlPng(imageBuffer);
   const resp = await cohere.v2.embed({

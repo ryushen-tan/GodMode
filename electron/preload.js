@@ -11,4 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchAsset:          (args) => ipcRenderer.invoke("assets:search", args),
   captureGameWindow:    () => ipcRenderer.invoke('capture-game-window'),
   openExternal:         (url) => ipcRenderer.send('open-external', url),
+  onScreenshotCaptured: (cb) => ipcRenderer.on('screenshot-captured', (_e, dataUrl) => cb(dataUrl)),
+  onScreenshotError:    (cb) => ipcRenderer.on('screenshot-error',    (_e, msg) => cb(msg)),
+  onToggleTopButtons:   (cb) => ipcRenderer.on('toggle-top-buttons',  () => cb()),
 });

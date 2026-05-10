@@ -699,6 +699,230 @@ body {
   gap: 6px;
 }
 
+/* Cmd+Shift+R toggles the top-right buttons (logo, Reddit, Cults3D). */
+body.top-buttons-hidden #add-button,
+body.top-buttons-hidden #export-to-reddit-btn,
+body.top-buttons-hidden #share-to-cults-btn {
+  display: none !important;
+}
+
+/* ============================================================================
+   Screenshot modal — centered glassmorphism flow
+   ========================================================================== */
+
+.shot-modal {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(10px) saturate(130%);
+  -webkit-backdrop-filter: blur(10px) saturate(130%);
+  z-index: 9999;
+  animation: shot-fade-in 180ms ease-out;
+  font-family: -apple-system, BlinkMacSystemFont, 'Geist Mono', 'Helvetica Neue', sans-serif;
+}
+.shot-modal.hidden { display: none; }
+@keyframes shot-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.shot-glass {
+  position: relative;
+  width: min(440px, 90vw);
+  max-height: 88vh;
+  overflow: hidden;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(18,18,20,0.72);
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  color: #f4f4f5;
+  animation: shot-pop-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes shot-pop-in {
+  from { transform: scale(0.96); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+.shot-stage[hidden] { display: none; }
+
+.shot-canvas-wrap {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 12px;
+  display: flex; align-items: center; justify-content: center;
+}
+.shot-canvas-wrap img,
+.shot-canvas-wrap canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 52vh;
+  width: auto; height: auto;
+  border-radius: 8px;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.shot-canvas-wrap canvas { cursor: crosshair; touch-action: none; }
+
+/* Beam loader — light traveling around border */
+.shot-beam {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  display: none;
+  overflow: visible;
+}
+.shot-beam.active { display: block; }
+.shot-beam-head {
+  stroke-dasharray: 18 82;
+  animation: shot-beam-travel 1.6s linear infinite;
+  filter: drop-shadow(0 0 6px rgba(255,255,255,0.85))
+          drop-shadow(0 0 14px rgba(255,255,255,0.45));
+}
+@keyframes shot-beam-travel {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -100; }
+}
+
+.shot-tools {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+.shot-tool {
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(244,244,245,0.7);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.shot-tool svg { width: 13px; height: 13px; }
+.shot-tool:hover { background: rgba(255,255,255,0.08); color: #f4f4f5; }
+.shot-tool.active {
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+}
+.shot-tools input[type="color"] {
+  width: 26px; height: 26px;
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 6px;
+  padding: 1px;
+  background: transparent;
+  cursor: pointer;
+}
+.shot-tools input[type="range"] {
+  flex: 1; min-width: 60px; height: 2px;
+  accent-color: rgba(255,255,255,0.7);
+}
+
+.shot-prompt-row { margin-bottom: 10px; }
+.shot-prompt-row input {
+  width: 100%;
+  padding: 7px 10px;
+  font: inherit; font-size: 12px;
+  color: #f4f4f5;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 7px;
+  outline: none;
+  transition: border-color 120ms ease, background 120ms ease;
+  box-sizing: border-box;
+}
+.shot-prompt-row input::placeholder { color: rgba(244,244,245,0.35); }
+.shot-prompt-row input:focus {
+  border-color: rgba(255,255,255,0.25);
+  background: rgba(255,255,255,0.06);
+}
+
+.shot-actions {
+  display: flex; justify-content: flex-end; gap: 6px;
+  align-items: center;
+  margin-top: 2px;
+}
+.shot-select {
+  padding: 6px 24px 6px 10px;
+  font: inherit; font-size: 12px;
+  color: #f4f4f5;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 7px;
+  outline: none;
+  cursor: pointer;
+  margin-right: auto;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='rgba(244,244,245,0.6)' stroke-width='1.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+.shot-select:hover { border-color: rgba(255,255,255,0.18); }
+.shot-select option { background: #1a1a1c; color: #f4f4f5; }
+.shot-actions-inline {
+  align-items: center;
+  justify-content: stretch;
+}
+.shot-actions-inline .shot-prompt-input {
+  flex: 1 1 auto;
+  min-width: 120px;
+  padding: 7px 10px;
+  font: inherit; font-size: 12px;
+  color: #f4f4f5;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 7px;
+  outline: none;
+  transition: border-color 120ms ease, background 120ms ease;
+  box-sizing: border-box;
+}
+.shot-actions-inline .shot-prompt-input::placeholder { color: rgba(244,244,245,0.55); }
+.shot-actions-inline .shot-prompt-input:focus {
+  border-color: rgba(255,255,255,0.4);
+  background: rgba(255,255,255,0.12);
+}
+.shot-btn {
+  padding: 7px 14px;
+  font: inherit; font-size: 12px; font-weight: 500;
+  letter-spacing: 0.01em;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, opacity 120ms;
+}
+.shot-btn:active { transform: translateY(0.5px); }
+.shot-btn[disabled] { opacity: 0.4; cursor: not-allowed; }
+.shot-btn-secondary {
+  background: transparent;
+  border-color: rgba(255,255,255,0.16);
+  color: rgba(244,244,245,0.85);
+}
+.shot-btn-secondary:hover:not([disabled]) {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.24);
+}
+.shot-btn-primary {
+  background: #ffffff;
+  color: #0a0a0a;
+  border-color: #ffffff;
+}
+.shot-btn-primary:hover:not([disabled]) { background: rgba(255,255,255,0.88); }
+
+.shot-status {
+  margin-top: 8px;
+  font-size: 11px;
+  color: rgba(244,244,245,0.55);
+  min-height: 14px;
+}
+.shot-3d-viewer-wrap { margin-bottom: 10px; }
+
 .reddit-link a:hover {
   color: #FF5722;
   text-decoration: underline;

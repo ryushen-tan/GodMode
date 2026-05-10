@@ -1,9 +1,11 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
-const { app, BrowserWindow, screen, ipcMain, desktopCapturer, shell } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, desktopCapturer, shell, globalShortcut, systemPreferences } = require('electron');
 const { execSync, exec, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const crypto = require('crypto');
 const { runAgent } = require('./services/backboard');
 
 
@@ -297,6 +299,120 @@ async function captureGodotWindowScreenshot() {
   }
 }
 
+let pickerWindow = null;
+let pickerInFlight = false;
+
+async function startRegionScreenshot() {
+  if (pickerInFlight || pickerWindow) return;
+  pickerInFlight = true;
+
+  try {
+    if (process.platform === 'darwin') {
+      const status = systemPreferences.getMediaAccessStatus('screen');
+      if (status !== 'granted') {
+        console.warn('[Screenshot] Screen Recording permission status:', status);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('screenshot-error',
+            'Grant Screen Recording permission to GodMode in System Settings → Privacy & Security → Screen Recording, then quit and relaunch the app.');
+        }
+        try {
+          shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+        } catch {}
+        return;
+      }
+    }
+
+    const wasVisible = mainWindow && mainWindow.isVisible();
+    if (wasVisible) mainWindow.hide();
+    await new Promise((r) => setTimeout(r, 180));
+
+    const display = screen.getPrimaryDisplay();
+    const sf = display.scaleFactor || 1;
+    const physW = Math.max(1, Math.round(display.size.width * sf));
+    const physH = Math.max(1, Math.round(display.size.height * sf));
+
+    let sources;
+    try {
+      sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: physW, height: physH },
+      });
+    } catch (err) {
+      console.error('[Screenshot] desktopCapturer failed:', err);
+      if (wasVisible) mainWindow.showInactive();
+      return;
+    }
+
+    const source = sources && sources[0];
+    if (!source || source.thumbnail.isEmpty()) {
+      console.error('[Screenshot] No screen source returned');
+      if (wasVisible) mainWindow.showInactive();
+      return;
+    }
+
+    const tmpPath = path.join(os.tmpdir(),
+      `godmode-shot-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.png`);
+    fs.writeFileSync(tmpPath, source.thumbnail.toPNG());
+
+    pickerWindow = new BrowserWindow({
+      x: display.bounds.x,
+      y: display.bounds.y,
+      width: display.bounds.width,
+      height: display.bounds.height,
+      show: false,
+      frame: false,
+      transparent: false,
+      backgroundColor: '#000000',
+      hasShadow: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'region-picker-preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    pickerWindow.setAlwaysOnTop(true, 'screen-saver');
+    pickerWindow.once('ready-to-show', () => {
+      if (pickerWindow && !pickerWindow.isDestroyed()) {
+        pickerWindow.showInactive();
+        pickerWindow.focus();
+      }
+    });
+
+    let settled = false;
+    const cleanup = (dataUrl) => {
+      if (settled) return;
+      settled = true;
+      ipcMain.removeListener('region-picker:confirm', onConfirm);
+      ipcMain.removeListener('region-picker:cancel', onCancel);
+      try { fs.unlinkSync(tmpPath); } catch {}
+      if (pickerWindow && !pickerWindow.isDestroyed()) pickerWindow.close();
+      pickerWindow = null;
+      if (wasVisible && mainWindow && !mainWindow.isDestroyed()) mainWindow.showInactive();
+      if (dataUrl && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('screenshot-captured', dataUrl);
+      }
+    };
+    const onConfirm = (_e, dataUrl) => cleanup(dataUrl);
+    const onCancel  = () => cleanup(null);
+    ipcMain.on('region-picker:confirm', onConfirm);
+    ipcMain.on('region-picker:cancel', onCancel);
+    pickerWindow.on('closed', () => { if (!settled) cleanup(null); });
+
+    await pickerWindow.loadFile('renderer/region-picker.html', {
+      query: { src: `file://${tmpPath}` },
+    });
+  } finally {
+    pickerInFlight = false;
+  }
+}
+
 function openSafeExternalUrl(url) {
   try {
     const parsed = new URL(String(url));
@@ -432,9 +548,31 @@ app.whenReady().then(() => {
     }
   }
   createWindow();
+  try {
+    const ok = globalShortcut.register('Control+Shift+A', () => startRegionScreenshot());
+    if (!ok) console.warn('[GodMode] failed to register Ctrl+Shift+A');
+    else console.log('[GodMode] Ctrl+Shift+A registered for screen-region capture');
+  } catch (err) {
+    console.warn('[GodMode] globalShortcut register error:', err.message);
+  }
+  try {
+    const ok = globalShortcut.register('Control+Shift+R', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('toggle-top-buttons');
+      }
+    });
+    if (!ok) console.warn('[GodMode] failed to register Ctrl+Shift+R');
+    else console.log('[GodMode] Ctrl+Shift+R registered for top-button toggle');
+  } catch (err) {
+    console.warn('[GodMode] globalShortcut register error:', err.message);
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
 });
 
 app.on('window-all-closed', () => {
