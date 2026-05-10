@@ -5,6 +5,7 @@ import {
   BackendThreeDProvider,
   pollThreeDGeneration,
 } from './services.bundle.js';
+import { initMonetization } from './monetization.js';
 
 const BACKEND_URL = 'http://localhost:3001';
 
@@ -64,6 +65,8 @@ function setPassthrough(enable) {
     window.electronAPI.setIgnoreMouseEvents(enable, { forward: true });
   }
 }
+
+const monetization = initMonetization({ setPassthrough });
 
 // Block clicks when hovering over button, panel, or floating log, pass through otherwise
 [addButton, panel, agentLog].forEach((el) => {
@@ -198,6 +201,8 @@ if (window.electronAPI) {
 submitBtn.addEventListener('click', async () => {
   const prompt = promptInput.value.trim();
   if (!prompt) return;
+  // Prototype charge: the fee is taken immediately before the async agent call starts.
+  if (!monetization.chargeAction('agentPrompt')) return;
 
   // Reset UI
   agentLog.style.display = 'none';
@@ -409,7 +414,8 @@ canvas.addEventListener('mouseleave', stopDrawing);
 document.addEventListener('click', (e) => {
   if (panel.classList.contains('visible') &&
       !panel.contains(e.target) &&
-      !addButton.contains(e.target)) {
+      !addButton.contains(e.target) &&
+      !monetization.isMonetizationElement(e.target)) {
     togglePanel();
   }
 });
@@ -844,6 +850,20 @@ async function compositeBaseAndModelOutput(baseData, maskData, modelOutputUrl) {
 
 // ---- Generate 2D: canvas → AWS Bedrock 2D → composite preview ----
 generate2dBtn.addEventListener('click', async () => {
+  if (baseImageData) {
+    const currentData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const maskData = computeInpaintMask(baseImageData, currentData);
+    if (!maskHasContent(maskData)) {
+      resultBox.style.display = 'block';
+      resultLog.innerHTML = '';
+      resultModel.innerHTML = '';
+      resultStatus.textContent = 'idle';
+      logLine('no strokes detected on top of the uploaded image. Draw something first.');
+      return;
+    }
+  }
+  // Prototype charge: the fee is taken immediately before upload/generation begins.
+  if (!monetization.chargeAction('texture2d')) return;
   generate2dBtn.disabled = true;
   generate3dBtn.disabled = true;
   resultBox.style.display = 'block';
@@ -1034,6 +1054,8 @@ generate3dBtn.addEventListener('click', async () => {
     logLine('no 2D image yet — click Generate 2D first');
     return;
   }
+  // Prototype charge: the fee is taken immediately before 3D provider work begins.
+  if (!monetization.chargeAction('model3d')) return;
   generate3dBtn.disabled = true;
   generate2dBtn.disabled = true;
   resultProgressFill.style.width = '0%';
@@ -1099,10 +1121,9 @@ generate3dBtn.addEventListener('click', async () => {
       const previewLink = json.cloudinaryPreviewUrl || json.previewImageUrl;
       resultModel.innerHTML =
         `<div class="result-label">3D Model (${label}, ${json.elapsedMs}ms)</div>` +
-        `<a href="${glbLink}" target="_blank" rel="noreferrer" download>Download .glb</a>` +
+        `<a href="${glbLink}" target="_blank" rel="noreferrer" download data-monetization-action="glbExport">Download .glb</a>` +
         (previewLink ? `<div style="margin-top:6px;"><a href="${previewLink}" target="_blank" rel="noreferrer">Preview image</a></div>` : '') +
         (json.cloudinaryGlbUrl ? `<div style="margin-top:6px;"><div class="result-label">Cloudinary</div><a href="${json.cloudinaryGlbUrl}" target="_blank" rel="noreferrer">GLB CDN</a><br/><a href="${json.cloudinaryPreviewUrl}" target="_blank" rel="noreferrer">Preview CDN</a></div>` : '');
-        `<a href="${json.modelUrl}" target="_blank" rel="noreferrer" download>Download .glb</a>`;
 
       // Auto-fill the prompt with the saved sprite path
       const glbFilename = json.modelUrl.split('/').pop().replace(/\.glb$/i, '.glb');
@@ -1154,10 +1175,9 @@ generate3dBtn.addEventListener('click', async () => {
       const previewLink = result.cloudinaryPreviewUrl || result.previewImageUrl;
       resultModel.innerHTML =
         `<div class="result-label">3D Model (Meshy)</div>` +
-        `<a href="${glbLink}" target="_blank" rel="noreferrer" download>Download .glb</a>` +
+        `<a href="${glbLink}" target="_blank" rel="noreferrer" download data-monetization-action="glbExport">Download .glb</a>` +
         (previewLink ? `<div style="margin-top:6px;"><a href="${previewLink}" target="_blank" rel="noreferrer">Preview image</a></div>` : '') +
         (result.cloudinaryGlbUrl ? `<div style="margin-top:6px;"><div class="result-label">Cloudinary</div><a href="${result.cloudinaryGlbUrl}" target="_blank" rel="noreferrer">GLB CDN</a><br/><a href="${result.cloudinaryPreviewUrl}" target="_blank" rel="noreferrer">Preview CDN</a></div>` : '');
-        `<a href="${result.modelUrl}" target="_blank" rel="noreferrer" download>Download .glb</a>`;
 
       // Auto-fill the prompt with the saved sprite path
       const glbFilename = result.modelUrl.split('/').pop().replace(/\.glb$/i, '.glb');
@@ -1184,5 +1204,14 @@ generate3dBtn.addEventListener('click', async () => {
   } finally {
     generate3dBtn.disabled = false;
     generate2dBtn.disabled = false;
+  }
+});
+
+resultModel.addEventListener('click', (event) => {
+  const link = event.target.closest('[data-monetization-action="glbExport"]');
+  if (!link) return;
+  if (!monetization.chargeAction('glbExport')) {
+    event.preventDefault();
+    event.stopPropagation();
   }
 });

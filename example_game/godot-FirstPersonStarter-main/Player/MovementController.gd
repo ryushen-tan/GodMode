@@ -23,6 +23,9 @@ func _physics_process(delta: float) -> void:
 	
 	if is_on_floor():
 		if Input.is_action_just_pressed("jump"):
+			# TODO(monetization): when Godot has a stable bridge back to the
+			# Electron overlay/backend, emit a jump event here so Sin of Greed
+			# can charge the configured per-jump cost without polling input.
 			velocity.y = jump_height
 	else:
 		velocity.y -= gravity * delta
@@ -39,6 +42,8 @@ func direction_input() -> void:
 
 
 func accelerate(delta: float) -> void:
+	# TODO(monetization): emit a walk/movement action from here after movement
+	# is debounced into meaningful steps. Avoid charging every physics tick.
 	# Using only the horizontal velocity, interpolate towards the input.
 	var temp_vel := velocity
 	temp_vel.y = 0

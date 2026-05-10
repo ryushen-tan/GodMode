@@ -14,16 +14,16 @@ body {
   pointer-events: auto;
 }
 
-/* Export to X Button */
-.export-x-btn {
+/* Export to Reddit Button */
+.export-reddit-btn {
   position: fixed;
   top: 20px;
   right: 96px;
   width: 50px;
   height: 50px;
   border-radius: 50%;
-  background: #000000;
-  border: 2px solid #1DA1F2;
+  background: #FF4500;
+  border: 2px solid #FF5722;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -33,25 +33,405 @@ body {
   color: #ffffff;
 }
 
-.export-x-btn:hover {
-  background: #1DA1F2;
+.export-reddit-btn:hover {
+  background: #FF5722;
   transform: scale(1.1);
-  box-shadow: 0 4px 12px rgba(29, 161, 242, 0.4);
+  box-shadow: 0 4px 12px rgba(255, 69, 0, 0.4);
 }
 
-.export-x-btn:active {
+.export-reddit-btn:active {
   transform: scale(0.95);
 }
 
-.export-x-btn.posting {
+.export-reddit-btn.posting {
   opacity: 0.6;
   cursor: not-allowed;
-  animation: pulse-x 1.5s infinite;
+  pointer-events: none;
+  animation: pulse-reddit 1.5s infinite;
 }
 
-@keyframes pulse-x {
+@keyframes pulse-reddit {
   0%, 100% { opacity: 0.6; }
   50% { opacity: 0.8; }
+}
+
+.share-cults-btn {
+  position: fixed;
+  top: 20px;
+  right: 152px;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: #7c3aed;
+  border: 2px solid #a78bfa;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 9998;
+  color: #ffffff;
+}
+
+.share-cults-btn:hover {
+  background: #8b5cf6;
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.45);
+}
+
+.share-cults-btn:active {
+  transform: scale(0.95);
+}
+
+.share-cults-btn.sharing {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+  animation: pulse-cults 1.5s infinite;
+}
+
+.share-cults-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+  filter: grayscale(0.8);
+}
+
+@keyframes pulse-cults {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 0.85; }
+}
+
+.monetization-btn {
+  position: fixed;
+  top: 20px;
+  right: 208px;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: rgba(5, 5, 8, 0.96);
+  border: 2px solid rgba(251, 191, 36, 0.75);
+  color: #fde68a;
+  font-family: inherit;
+  font-size: 22px;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 9998;
+  box-shadow: inset 0 0 14px rgba(251, 191, 36, 0.14), 0 4px 18px rgba(0, 0, 0, 0.45);
+}
+
+.monetization-btn:hover {
+  background: rgba(32, 24, 8, 0.98);
+  transform: scale(1.1);
+  box-shadow: 0 4px 18px rgba(251, 191, 36, 0.35), inset 0 0 18px rgba(251, 191, 36, 0.2);
+}
+
+.monetization-modal {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 88px 20px 20px;
+  background: rgba(0, 0, 0, 0.12);
+  z-index: 10001;
+  color: #e2e8f0;
+}
+
+.monetization-modal.visible {
+  display: flex;
+}
+
+.monetization-panel {
+  width: 520px;
+  max-width: calc(100vw - 40px);
+  max-height: calc(100vh - 108px);
+  overflow-y: auto;
+  padding: 20px;
+  background: rgba(5, 5, 8, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  border-radius: 2px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.75), inset 0 0 18px rgba(251, 191, 36, 0.05);
+}
+
+.monetization-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.monetization-header h2 {
+  color: #fff;
+  font-size: 16px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.monetization-notice {
+  margin-top: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.monetization-notice.success { color: #86efac; }
+.monetization-notice.danger { color: #fca5a5; }
+
+.monetization-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.monetization-tab {
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  color: #cbd5e1;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.monetization-tab.active {
+  color: #fff;
+  border-color: rgba(251, 191, 36, 0.72);
+  background: rgba(251, 191, 36, 0.12);
+  box-shadow: inset 0 0 12px rgba(251, 191, 36, 0.12);
+}
+
+.monetization-section {
+  display: none;
+}
+
+.monetization-section.active {
+  display: block;
+}
+
+.greed-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  margin-bottom: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.greed-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: #fbbf24;
+}
+
+.greed-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.greed-stats > div,
+.monetization-output-grid > div {
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+}
+
+.greed-stats span,
+.monetization-output-grid span {
+  display: block;
+  margin-bottom: 4px;
+  color: #94a3b8;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.greed-stats strong,
+.monetization-output-grid strong {
+  color: #fde68a;
+  font-size: 18px;
+}
+
+.monetization-modal.low-funds .greed-stats strong { color: #fbbf24; }
+.monetization-modal.bankrupt .greed-stats strong { color: #f87171; }
+
+.greed-warning {
+  margin-bottom: 12px;
+  padding: 9px 10px;
+  color: #cbd5e1;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.monetization-modal.bankrupt .greed-warning {
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.36);
+}
+
+.monetization-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.monetization-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.monetization-fields input,
+.monetization-fields select {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.monetization-fields input:focus,
+.monetization-fields select:focus {
+  outline: none;
+  border-color: rgba(251, 191, 36, 0.75);
+  box-shadow: inset 0 0 10px rgba(251, 191, 36, 0.1);
+}
+
+.monetization-wide-btn {
+  width: 100%;
+  justify-content: center;
+  margin: 12px 0;
+}
+
+.greed-log,
+.monetization-output {
+  margin-top: 12px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+.greed-log {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.greed-log-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.greed-log-row:last-child {
+  border-bottom: 0;
+}
+
+.greed-log-row strong {
+  color: #fbbf24;
+}
+
+.greed-empty {
+  color: #64748b;
+}
+
+.monetization-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.monetization-actions .upload-button {
+  justify-content: center;
+}
+
+.monetization-output:empty {
+  display: none;
+}
+
+.monetization-output-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.monetization-copy-block {
+  padding: 10px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.monetization-copy-block:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.monetization-copy-block strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #fff;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.monetization-copy-block p,
+.monetization-copy-block li {
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.monetization-copy-block ul {
+  margin-left: 16px;
+}
+
+@media (max-width: 620px) {
+  .monetization-fields,
+  .greed-stats,
+  .monetization-actions,
+  .monetization-output-grid {
+    grid-template-columns: 1fr;
+  }
+  .monetization-btn {
+    right: 20px;
+    top: 92px;
+  }
 }
 
 #add-button {
@@ -632,3 +1012,26 @@ body {
 }
 .result-log > div { padding: 1px 0; }
 .result-model a { color: #67e8f9; word-break: break-all; font-size: 12px; }
+
+/* Reddit link in agent results */
+.reddit-link {
+  margin-top: 12px;
+  padding: 10px;
+  background: rgba(255, 69, 0, 0.1);
+  border: 1px solid rgba(255, 69, 0, 0.3);
+  border-radius: 6px;
+}
+
+.reddit-link a {
+  color: #FF4500;
+  text-decoration: none;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reddit-link a:hover {
+  color: #FF5722;
+  text-decoration: underline;
+}

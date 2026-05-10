@@ -23,6 +23,93 @@
     </svg>
   </button>
 
+  <button id="monetization-btn" class="monetization-btn" title="Monetization">
+    $
+  </button>
+
+  <div id="monetization-modal" class="monetization-modal" aria-hidden="true">
+    <div class="monetization-panel" role="dialog" aria-labelledby="monetization-title">
+      <div class="monetization-header">
+        <div>
+          <h2 id="monetization-title">Monetization</h2>
+          <p id="monetization-notice" class="monetization-notice">Sinfully local. No payment rails attached yet.</p>
+        </div>
+        <button id="monetization-close-btn" class="close-btn">&times;</button>
+      </div>
+
+      <div class="monetization-tabs">
+        <button class="monetization-tab active" data-monetization-tab="greed">Sin of Greed</button>
+        <button class="monetization-tab" data-monetization-tab="merch">Merchandize</button>
+      </div>
+
+      <section class="monetization-section active" data-monetization-section="greed">
+        <label class="greed-toggle">
+          <input type="checkbox" id="greed-enabled">
+          <span>Enable Sin of Greed</span>
+        </label>
+
+        <div class="greed-stats">
+          <div>
+            <span>Remaining</span>
+            <strong id="greed-remaining">$100.00</strong>
+          </div>
+          <div>
+            <span>Total spent</span>
+            <strong id="greed-spent">$0.00</strong>
+          </div>
+        </div>
+        <div id="greed-warning" class="greed-warning">Sin of Greed is sleeping. No actions are charged.</div>
+
+        <div class="monetization-fields">
+          <label>Wallet budget<input id="greed-budget" type="number" min="0" step="0.01" value="100.00"></label>
+          <label>Cost per walk step<input type="number" min="0" step="0.01" data-greed-cost="walk"></label>
+          <label>Cost per jump<input type="number" min="0" step="0.01" data-greed-cost="jump"></label>
+          <label>Cost per AI agent prompt<input type="number" min="0" step="0.01" data-greed-cost="agentPrompt"></label>
+          <label>Cost per 2D texture<input type="number" min="0" step="0.01" data-greed-cost="texture2d"></label>
+          <label>Cost per 3D model<input type="number" min="0" step="0.01" data-greed-cost="model3d"></label>
+          <label>Cost per GLB export<input type="number" min="0" step="0.01" data-greed-cost="glbExport"></label>
+        </div>
+
+        <button id="greed-reset" class="upload-button monetization-wide-btn">Reset Budget</button>
+        <div id="greed-log" class="greed-log"></div>
+      </section>
+
+      <section class="monetization-section" data-monetization-section="merch">
+        <div class="monetization-fields">
+          <label>Asset type
+            <select id="merch-asset-type">
+              <option value="2d">2D</option>
+              <option value="3d">3D GLB</option>
+            </select>
+          </label>
+          <label>Merch type
+            <select id="merch-type"></select>
+          </label>
+          <label>Platform
+            <select id="merch-platform">
+              <option value="etsy">Etsy</option>
+              <option value="shopify">Shopify</option>
+              <option value="gumroad">Gumroad</option>
+              <option value="redbubble">Redbubble</option>
+              <option value="printful">Printful</option>
+              <option value="kickstarter">Kickstarter</option>
+              <option value="tiktok-shop">TikTok Shop</option>
+            </select>
+          </label>
+          <label>Describe the asset/character
+            <input id="merch-description" type="text" placeholder="e.g. chrome bus wizard with bad accounting">
+          </label>
+        </div>
+        <div class="monetization-actions">
+          <button id="merch-generate-strategy" class="upload-button">Generate Merch Strategy</button>
+          <button id="merch-draft-copy" class="upload-button" disabled>Draft Launch Copy</button>
+        </div>
+        <div id="merch-strategy-output" class="monetization-output"></div>
+        <div id="merch-copy-output" class="monetization-output"></div>
+      </section>
+    </div>
+  </div>
+
   <div id="panel">
     <div class="panel-header">
       <h2>Sketch & Prompt</h2>
