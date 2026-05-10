@@ -5,14 +5,22 @@
 [ext_resource type="PackedScene" uid="uid://ctkc7yqdqdtao" path="res://Levels/Main/Geometry/Floor.tscn" id="1_yb0tt"]
 [ext_resource type="PackedScene" uid="uid://cdn7d5mxwdyks" path="res://Levels/Main/Geometry/Wall.tscn" id="3_jw8hm"]
 [ext_resource type="Material" uid="uid://sofvlrq3jmka" path="res://Levels/Main/Materials/M_Dark.tres" id="4_m7xar"]
-[ext_resource type="PackedScene" uid="uid://avocado_resource" path="res://sprites/Avocado.glb" id="5_avocado"]
-[ext_resource type="PackedScene" uid="uid://o3ydwkc4fakh" path="res://sprites/ABlueCar-2d3b.glb" id="gm_ebf6c133"]
-[ext_resource type="PackedScene" uid="uid://buhcryu82r0xk" path="res://sprites/APurpleCar-d00d.glb" id="gm_4529b2b5"]
-[ext_resource type="PackedScene" uid="uid://dpchvrdvpptuq" path="res://sprites/BlueCarWithRings-b63c.glb" id="gm_ee766d8e"]
-[ext_resource type="PackedScene" uid="uid://bg55ykxrw05ah" path="res://sprites/AnAirplaneWithFire-3bf5.glb" id="gm_a1ccd3d6"]
-[ext_resource type="PackedScene" uid="uid://br0668txsesid" path="res://sprites/IWantToMake-f61a.glb" id="gm_f19cca55"]
-[ext_resource type="PackedScene" uid="uid://8dd3cek0l41q" path="res://sprites/AGatoradeWaterBottle-eea8.glb" id="gm_e999b653"]
-[ext_resource type="PackedScene" uid="uid://bdxyv0wupvbt" path="res://sprites/Tree-5d68.glb" id="gm_648eff18"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_Acarb757" path="res://sprites/ACar-b757.glb" id="gm_scatter_Acarb757"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_AddABlueCar56d1" path="res://sprites/AddABlueCar-56d1.glb" id="gm_scatter_AddABlueCar56d1"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_Avocado" path="res://sprites/Avocado.glb" id="gm_scatter_Avocado"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_ARedApplea58a" path="res://sprites/ARedApple-a58a.glb" id="gm_scatter_ARedApplea58a"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_ASingularApple67b2" path="res://sprites/ASingularApple-67b2.glb" id="gm_scatter_ASingularApple67b2"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_BarramundiFish" path="res://sprites/BarramundiFish.glb" id="gm_scatter_BarramundiFish"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_Duck" path="res://sprites/Duck.glb" id="gm_scatter_Duck"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_Fox" path="res://sprites/Fox.glb" id="gm_scatter_Fox"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_MakeAnOrangeCar2dbf" path="res://sprites/MakeAnOrangeCar-2dbf.glb" id="gm_scatter_MakeAnOrangeCar2dbf"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_sf3d0cb8" path="res://sprites/sf3d-0cb8.glb" id="gm_scatter_sf3d0cb8"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_sf3d76ad" path="res://sprites/sf3d-76ad.glb" id="gm_scatter_sf3d76ad"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_sf3da717" path="res://sprites/sf3d-a717.glb" id="gm_scatter_sf3da717"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_sf3da7ec" path="res://sprites/sf3d-a7ec.glb" id="gm_scatter_sf3da7ec"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_sf3d32b3" path="res://sprites/sf3d-32b3.glb" id="gm_scatter_sf3d32b3"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_sf3dd272e1" path="res://sprites/sf3d-1778333560513-d272e1.glb" id="gm_scatter_sf3dd272e1"]
+[ext_resource type="PackedScene" uid="uid://gm_scatter_WaterBottle" path="res://sprites/WaterBottle.glb" id="gm_scatter_WaterBottle"]
 [sub_resource type="BoxMesh" id="BoxMesh_egctf"]
 size = Vector3(8, 4, 4)
 
@@ -238,19 +246,38 @@ transform = Transform3D(-0.866025, -0.433013, 0.25, 0, 0.5, 0.866026, -0.5, 0.75
 shadow_enabled = true
 directional_shadow_max_distance = 250.0
 
-[node name="Avocado" parent="." unique_id=312345678 instance=ExtResource("5_avocado")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 3, 0)
-[node name="ABlueCar2d3b" parent="." unique_id=1766484019 instance=ExtResource("gm_ebf6c133")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
-[node name="APurpleCarD00d" parent="." unique_id=1461442463 instance=ExtResource("gm_4529b2b5")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 5, 0)
-[node name="BlueCarWithRingsB63c" parent="." unique_id=126290529 instance=ExtResource("gm_ee766d8e")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0, 4)
-[node name="AnAirplaneWithFire3bf5" parent="." unique_id=1976460258 instance=ExtResource("gm_a1ccd3d6")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 8, 0)
-[node name="IWantToMakeF61a" parent="." unique_id=1622690350 instance=ExtResource("gm_f19cca55")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
-[node name="AGatoradeWaterBottleEea8" parent="." unique_id=1963674111 instance=ExtResource("gm_e999b653")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 4)
-[node name="Tree5d68" parent="." unique_id=782858041 instance=ExtResource("gm_648eff18")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
+[node name="SpriteScatter" type="Node3D" parent="."]
+position = Vector3(0, 2, 0)
+
+[node name="Scatter_ACar_b757" parent="SpriteScatter" instance=ExtResource("gm_scatter_Acarb757")]
+position = Vector3(10, 0, 0)
+[node name="Scatter_AddABlueCar_56d1" parent="SpriteScatter" instance=ExtResource("gm_scatter_AddABlueCar56d1")]
+position = Vector3(9.239, 0, 3.827)
+[node name="Scatter_Avocado" parent="SpriteScatter" instance=ExtResource("gm_scatter_Avocado")]
+position = Vector3(7.071, 0, 7.071)
+[node name="Scatter_ARedApple_a58a" parent="SpriteScatter" instance=ExtResource("gm_scatter_ARedApplea58a")]
+position = Vector3(3.827, 0, 9.239)
+[node name="Scatter_ASingularApple_67b2" parent="SpriteScatter" instance=ExtResource("gm_scatter_ASingularApple67b2")]
+position = Vector3(0, 0, 10)
+[node name="Scatter_BarramundiFish" parent="SpriteScatter" instance=ExtResource("gm_scatter_BarramundiFish")]
+position = Vector3(-3.827, 0, 9.239)
+[node name="Scatter_Duck" parent="SpriteScatter" instance=ExtResource("gm_scatter_Duck")]
+position = Vector3(-7.071, 0, 7.071)
+[node name="Scatter_Fox" parent="SpriteScatter" instance=ExtResource("gm_scatter_Fox")]
+position = Vector3(-9.239, 0, 3.827)
+[node name="Scatter_MakeAnOrangeCar_2dbf" parent="SpriteScatter" instance=ExtResource("gm_scatter_MakeAnOrangeCar2dbf")]
+position = Vector3(-10, 0, 0)
+[node name="Scatter_sf3d_0cb8" parent="SpriteScatter" instance=ExtResource("gm_scatter_sf3d0cb8")]
+position = Vector3(-9.239, 0, -3.827)
+[node name="Scatter_sf3d_76ad" parent="SpriteScatter" instance=ExtResource("gm_scatter_sf3d76ad")]
+position = Vector3(-7.071, 0, -7.071)
+[node name="Scatter_sf3d_a717" parent="SpriteScatter" instance=ExtResource("gm_scatter_sf3da717")]
+position = Vector3(-3.827, 0, -9.239)
+[node name="Scatter_sf3d_a7ec" parent="SpriteScatter" instance=ExtResource("gm_scatter_sf3da7ec")]
+position = Vector3(0, 0, -10)
+[node name="Scatter_sf3d_32b3" parent="SpriteScatter" instance=ExtResource("gm_scatter_sf3d32b3")]
+position = Vector3(3.827, 0, -9.239)
+[node name="Scatter_sf3d_d272e1" parent="SpriteScatter" instance=ExtResource("gm_scatter_sf3dd272e1")]
+position = Vector3(7.071, 0, -7.071)
+[node name="Scatter_WaterBottle" parent="SpriteScatter" instance=ExtResource("gm_scatter_WaterBottle")]
+position = Vector3(9.239, 0, -3.827)

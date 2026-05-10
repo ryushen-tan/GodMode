@@ -140,6 +140,15 @@
       </model-viewer>
       <div id="result-model" class="result-model"></div>
     </div>
+
+    <div class="embed-section">
+      <label class="result-label" for="asset-match-threshold">Asset match threshold (cosine)</label>
+      <div class="embed-row">
+        <input id="asset-match-threshold" type="number" min="0" max="1" step="0.01" value="0.85" />
+        <button id="process-embeddings-btn" class="upload-button">Process embeddings</button>
+      </div>
+      <div id="process-embeddings-status" class="match-result"></div>
+    </div>
   </div>
 
   <div id="agent-log" class="agent-log floating-log" style="display:none;">

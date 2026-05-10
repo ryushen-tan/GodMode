@@ -681,6 +681,35 @@ body {
 .result-log > div { padding: 1px 0; }
 .result-model a { color: #67e8f9; word-break: break-all; font-size: 12px; }
 
+.embed-section {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.embed-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+#asset-match-threshold {
+  width: 120px;
+  padding: 8px 10px;
+  background: rgba(0,0,0,0.3);
+  color: #f8fafc;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+#asset-match-threshold:focus {
+  outline: none;
+  border-color: rgba(99,102,241,0.8);
+}
+
 /* Reddit link in agent results */
 .reddit-link {
   margin-top: 12px;

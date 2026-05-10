@@ -31,22 +31,69 @@ const uploadBtn = document.getElementById('upload-btn');
 const fileInput = document.getElementById('file-input');
 const fileName = document.getElementById('file-name');
 const matchResult = document.getElementById('match-result');
+const processEmbeddingsBtn = document.getElementById('process-embeddings-btn');
+const processEmbeddingsStatus = document.getElementById('process-embeddings-status');
+const assetMatchThresholdInput = document.getElementById('asset-match-threshold');
+
+const DEFAULT_ASSET_MATCH_THRESHOLD = 0.85;
+
+function clamp01(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return null;
+  return Math.max(0, Math.min(1, x));
+}
+
+function getAssetMatchThreshold() {
+  const v = clamp01(assetMatchThresholdInput?.value);
+  return v == null ? DEFAULT_ASSET_MATCH_THRESHOLD : v;
+}
 
 async function searchFromBase64DataUrl(dataUrl) {
   const base64 = String(dataUrl).split(',')[1] || '';
   if (!base64) return;
   if (matchResult) matchResult.textContent = 'Searching...';
-  const res = await window.electronAPI.searchAsset({ imageBase64: base64 });
+  const res = await window.electronAPI.searchAsset({
+    imageBase64: base64,
+    minCosineSimilarity: getAssetMatchThreshold(),
+  });
   if (!matchResult) return;
   if (res && res.match && res.match.path) {
-    matchResult.textContent = `Match (${res.method}): ${res.match.path}`;
+    const scoreText = typeof res.score === 'number' ? ` score=${res.score.toFixed(3)}` : '';
+    matchResult.textContent = `Match (${res.method}${scoreText}): ${res.match.path}`;
     // Note: auto-select intentionally removed — the search may match a
     // similar-shaped sprite even when the user's photo is visually
     // different (e.g. their green bottle vs the cream Khronos WaterBottle).
     // Force user to consciously pick the base sprite they want to merge into.
   } else {
-    matchResult.textContent = 'No match found.';
+    const scoreText = typeof res?.score === 'number'
+      ? ` (best score=${res.score.toFixed(3)}, threshold=${getAssetMatchThreshold().toFixed(2)})`
+      : '';
+    matchResult.textContent = `No match found${scoreText}.`;
   }
+}
+
+async function processEmbeddings() {
+  if (!window.electronAPI?.indexSprites) return;
+  if (processEmbeddingsStatus) processEmbeddingsStatus.textContent = 'Processing embeddings...';
+  try {
+    const res = await window.electronAPI.indexSprites({});
+    if (processEmbeddingsStatus) {
+      const embedded = typeof res?.embedded === 'number' ? res.embedded : null;
+      const skipped = typeof res?.skipped === 'number' ? res.skipped : null;
+      processEmbeddingsStatus.textContent =
+        `Indexed: ${res?.indexed ?? 0}` +
+        (embedded != null ? `, embedded: ${embedded}` : '') +
+        (skipped != null ? `, skipped: ${skipped}` : '');
+    }
+  } catch (err) {
+    if (processEmbeddingsStatus) {
+      processEmbeddingsStatus.textContent = `Embeddings error: ${err?.message || String(err)}`;
+    }
+  }
+}
+
+if (processEmbeddingsBtn) {
+  processEmbeddingsBtn.addEventListener('click', processEmbeddings);
 }
 
 let isDrawing = false;

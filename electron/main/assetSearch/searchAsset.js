@@ -4,6 +4,14 @@ const { openDb, initSchema, all, get } = require("./db");
 const { sha256, ahashFromRgba, hammingDistanceHex } = require("./imageFingerprint");
 const { embedImageViaCohere } = require("./cohereEmbed");
 
+function cosineSimilarityFromDistance(distance) {
+  // sqlite-vec vec0 defaults to cosine distance for FLOAT vectors: distance = 1 - cosineSim
+  if (typeof distance !== "number") return null;
+  const cos = 1 - distance;
+  if (!Number.isFinite(cos)) return null;
+  return cos;
+}
+
 async function computeAhash(buffer) {
   const tiny = await sharp(buffer, { failOn: "none" })
     .resize(8, 8, { fit: "fill" })
@@ -13,7 +21,14 @@ async function computeAhash(buffer) {
   return ahashFromRgba({ rgba: tiny.data, width: 8, height: 8 });
 }
 
-async function searchAsset({ imageBuffer, dbPath, embeddingModel, topK = 5, thumbSize = 256 }) {
+async function searchAsset({
+  imageBuffer,
+  dbPath,
+  embeddingModel,
+  topK = 5,
+  thumbSize = 256,
+  minCosineSimilarity = 0.85,
+}) {
   if (!imageBuffer) throw new Error("searchAsset: imageBuffer is required");
 
   const { db, dbPath: finalDbPath } = openDb({ dbPath });
@@ -63,12 +78,23 @@ async function searchAsset({ imageBuffer, dbPath, embeddingModel, topK = 5, thum
     [vec, topK],
   );
 
+  const withScores = (rows || []).map((r) => ({
+    ...r,
+    cosineSim: cosineSimilarityFromDistance(r.distance),
+  }));
+
+  const best = withScores[0] || null;
+  const bestCos = typeof best?.cosineSim === "number" ? best.cosineSim : null;
+  const passes = !!(best && bestCos != null && bestCos >= minCosineSimilarity);
+
   db.close();
   return {
-    match: rows[0] || null,
+    match: passes ? best : null,
     method: "vector",
     dbPath: finalDbPath,
-    alternatives: rows.slice(1),
+    alternatives: withScores.slice(1),
+    score: bestCos,
+    threshold: minCosineSimilarity,
   };
 }
 

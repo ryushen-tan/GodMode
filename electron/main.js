@@ -272,6 +272,26 @@ function startFileWatcher() {
 
 const { indexSprites } = require("./main/assetSearch/indexSprites");
 const { searchAsset } = require("./main/assetSearch/searchAsset");
+const SPRITES_DIR = path.join(
+  __dirname,
+  '..',
+  'example_game',
+  'godot-FirstPersonStarter-main',
+  'sprites',
+);
+
+let spriteIndexDebounce = null;
+function scheduleIndexAllSprites(delayMs = 800) {
+  if (spriteIndexDebounce) clearTimeout(spriteIndexDebounce);
+  spriteIndexDebounce = setTimeout(async () => {
+    try {
+      const embeddingModel = process.env.COHERE_EMBED_MODEL || "embed-v4.0";
+      await indexSprites({ spritesRoot: SPRITES_DIR, dbPath: path.join(__dirname, 'asset_index.sqlite'), embeddingModel });
+    } catch (err) {
+      console.warn('[assets] indexSprites failed:', err.message || err);
+    }
+  }, delayMs);
+}
 
 async function captureGodotWindowScreenshot() {
   try {
@@ -343,8 +363,8 @@ function createWindow() {
   });
 
   ipcMain.handle("assets:indexSprites", async (_event, args) => {
-    const spritesRoot = args?.spritesRoot;
-    const dbPath = args?.dbPath;
+    const spritesRoot = args?.spritesRoot || SPRITES_DIR;
+    const dbPath = args?.dbPath || path.join(__dirname, 'asset_index.sqlite');
     const embeddingModel =
       args?.embeddingModel || process.env.COHERE_EMBED_MODEL || "embed-v4.0";
     if (typeof indexSprites === 'function') {
@@ -360,10 +380,14 @@ function createWindow() {
     const dbPath = args?.dbPath;
     const embeddingModel =
       args?.embeddingModel || process.env.COHERE_EMBED_MODEL || "embed-v4.0";
+    const minCosineSimilarity =
+      typeof args?.minCosineSimilarity === 'number'
+        ? args.minCosineSimilarity
+        : (process.env.ASSET_MATCH_THRESHOLD ? Number(process.env.ASSET_MATCH_THRESHOLD) : 0.85);
     if (!imageBase64) throw new Error("assets:search: imageBase64 is required");
     const buf = Buffer.from(imageBase64, "base64");
     if (typeof searchAsset === 'function') {
-      return await searchAsset({ imageBuffer: buf, dbPath, embeddingModel });
+      return await searchAsset({ imageBuffer: buf, dbPath, embeddingModel, minCosineSimilarity });
     } else {
       console.error('[GodMode] searchAsset function is not defined.');
       return null;
@@ -414,6 +438,18 @@ function createWindow() {
   // Give the window a moment to load, then start everything
   mainWindow.webContents.once('did-finish-load', () => {
     buildSwiftHelper(() => {
+      scheduleIndexAllSprites(50);
+      try {
+        fs.watch(SPRITES_DIR, { recursive: true }, (_event, filename) => {
+          if (!filename) return;
+          const ext = path.extname(filename).toLowerCase();
+          if (ext === '.png' || ext === '.jpg' || ext === '.jpeg' || ext === '.webp') {
+            scheduleIndexAllSprites();
+          }
+        });
+      } catch (err) {
+        console.warn('[assets] sprites watch failed:', err.message || err);
+      }
       launchGodot();
       startFileWatcher();
       // Wait 2s for Godot to open its window before we start tracking

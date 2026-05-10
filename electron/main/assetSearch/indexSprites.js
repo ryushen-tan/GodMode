@@ -4,7 +4,7 @@ const path = require("path");
 const sharp = require("sharp");
 const sqliteVec = require("sqlite-vec");
 
-const { openDb, initSchema, run } = require("./db");
+const { openDb, initSchema, run, get } = require("./db");
 const { sha256, ahashFromRgba } = require("./imageFingerprint");
 const { embedImageViaCohere } = require("./cohereEmbed");
 
@@ -30,6 +30,17 @@ async function ensureVecTables(db, dims) {
   await run(db, `CREATE VIRTUAL TABLE IF NOT EXISTS asset_embeddings USING vec0(embedding FLOAT[${dims}], asset_id INTEGER);`);
 }
 
+async function hasEmbeddingsTable(db) {
+  const row = await new Promise((resolve) => {
+    db.get(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='asset_embeddings'`,
+      [],
+      (_err, r) => resolve(r || null),
+    );
+  });
+  return !!row;
+}
+
 async function indexSprites({ spritesRoot, dbPath, embeddingModel, thumbSize = 256 }) {
   if (!spritesRoot) throw new Error("indexSprites: spritesRoot is required");
 
@@ -40,6 +51,9 @@ async function indexSprites({ spritesRoot, dbPath, embeddingModel, thumbSize = 2
   const now = Date.now();
 
   let vecInitialized = false;
+  let embedded = 0;
+  let skipped = 0;
+  const embeddingsTableExists = await hasEmbeddingsTable(db);
   for (const filePath of files) {
     const stat = await fsp.stat(filePath);
     const buf = await fsp.readFile(filePath);
@@ -57,7 +71,7 @@ async function indexSprites({ spritesRoot, dbPath, embeddingModel, thumbSize = 2
 
     const ahash = ahashFromRgba({ rgba: tiny.data, width: 8, height: 8 });
 
-    const inserted = await run(
+    await run(
       db,
       `INSERT INTO assets(path, sha256, ahash, bytes, width, height, mtime_ms, indexed_at_ms)
        VALUES(?, ?, ?, ?, ?, ?, ?, ?)
@@ -73,10 +87,17 @@ async function indexSprites({ spritesRoot, dbPath, embeddingModel, thumbSize = 2
     );
 
     // sqlite3 doesn't easily expose last_insert_rowid() on upsert; re-select by path.
-    const row = await new Promise((resolve, reject) => {
-      db.get(`SELECT id FROM assets WHERE path=?`, [filePath], (err, r) => (err ? reject(err) : resolve(r)));
-    });
-    const assetId = row.id;
+    const row = await get(db, `SELECT id, sha256, embedding_sha256 FROM assets WHERE path=?`, [filePath]);
+    const assetId = row?.id;
+    if (!assetId) continue;
+
+    // If file content hasn't changed since the last embedding run, and we already
+    // have an embeddings table, skip re-embedding.
+    // (If the embeddings table doesn't exist yet, we must embed at least once.)
+    if (embeddingsTableExists && row.embedding_sha256 && row.embedding_sha256 === hash) {
+      skipped++;
+      continue;
+    }
 
     // Embed thumbnail and store vector
     const thumbBuf = await img
@@ -97,10 +118,12 @@ async function indexSprites({ spritesRoot, dbPath, embeddingModel, thumbSize = 2
       assetId,
       new Float32Array(vector),
     ]);
+    await run(db, `UPDATE assets SET embedding_sha256=? WHERE id=?`, [hash, assetId]);
+    embedded++;
   }
 
   await new Promise((resolve) => db.close(resolve));
-  return { indexed: files.length, dbPath: finalDbPath };
+  return { indexed: files.length, embedded, skipped, dbPath: finalDbPath };
 }
 
 module.exports = { indexSprites };
