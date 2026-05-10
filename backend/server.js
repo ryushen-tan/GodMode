@@ -66,9 +66,11 @@ const REPLICATE_TRIPOSR_VERSION = 'e0d3fe8abce3ba86497ea3530d9eae59af7b2231b6c82
 const { initializeCyStack } = require('./security/cystack-integration');
 const cystack = initializeCyStack();
 
-// Composio Twitter Integration
-const { getComposioService } = require('./services/composio-twitter');
+// Composio Reddit Integration
+const { getComposioService } = require('./services/composio-reddit');
 const composio = getComposioService();
+const { getCultsService } = require('./services/composio-cults');
+const cults = getCultsService();
 
 tick(`config (port=${PORT}, region=${REGION})`);
 const bedrock = new BedrockRuntimeClient({ region: REGION }); tick('bedrock client');
@@ -141,49 +143,50 @@ app.get('/api/cystack/telemetry', (_req, res) => {
 });
 
 // ============================================================================
-// Composio Twitter Integration Endpoints
+// Composio Reddit Integration Endpoints
 // ============================================================================
 
-// Check Twitter connection status
-app.get('/api/twitter/status', async (_req, res) => {
+// Check Reddit connection status
+app.get('/api/reddit/status', async (_req, res) => {
   try {
     await composio.initialize();
     const status = await composio.checkConnection();
     res.json(status);
   } catch (err) {
-    console.error('[twitter/status] error:', err);
+    console.error('[reddit/status] error:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Get Twitter OAuth connection URL
-app.get('/api/twitter/connect', async (_req, res) => {
+// Get Reddit OAuth connection URL
+app.get('/api/reddit/connect', async (_req, res) => {
   try {
     await composio.initialize();
     const { url, connectionId } = await composio.getConnectionUrl();
     res.json({ url, connectionId });
   } catch (err) {
-    console.error('[twitter/connect] error:', err);
+    console.error('[reddit/connect] error:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Post screenshot to Twitter
-app.post('/api/twitter/post', upload.single('screenshot'), async (req, res) => {
+// Post screenshot to Reddit
+app.post('/api/reddit/post', upload.single('screenshot'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No screenshot provided' });
     }
 
-    const text = req.body.text || 'Check out my game! Made with #GodMode 🎮';
+    const title = req.body.title || 'Check out my game! Made with GodMode 🎮';
+    const subreddit = req.body.subreddit || 'SOONHackathon';
     const imageBuffer = req.file.buffer;
 
     await composio.initialize();
-    const result = await composio.postTweet(text, imageBuffer);
+    const result = await composio.postToReddit(title, subreddit, imageBuffer);
 
     res.json(result);
   } catch (err) {
-    console.error('[twitter/post] error:', err);
+    console.error('[reddit/post] error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -198,6 +201,14 @@ const SPRITES_DIR = path.join(
   'godot-FirstPersonStarter-main',
   'sprites',
 );
+
+function saveSpriteGlb(filename, glbBuf) {
+  const spritePath = path.join(SPRITES_DIR, filename);
+  fs.writeFileSync(spritePath, glbBuf);
+  const { createImportFile } = require('./ensure-imports');
+  createImportFile(spritePath);
+  return spritePath;
+}
 
 app.get('/api/sprites', (_req, res) => {
   try {
@@ -895,6 +906,102 @@ async function maybeSendSmsWithCloudinaryLinks(cloud) {
 
 const publicPreviewUrl = (id) => `${baseUrl()}/previews/${id}.png`;
 
+async function uploadBufferToCatbox(buffer, filename, mimeType) {
+  const form = new FormData();
+  form.append('reqtype', 'fileupload');
+  form.append('fileToUpload', new Blob([buffer], { type: mimeType }), filename);
+
+  const response = await fetch('https://catbox.moe/user/api.php', {
+    method: 'POST',
+    body: form
+  });
+  const url = (await response.text()).trim();
+  if (!response.ok || !/^https?:\/\/\S+$/i.test(url)) {
+    throw new Error(`Public model upload failed (${response.status}): ${url.slice(0, 200)}`);
+  }
+  return url;
+}
+
+async function resolvePublicFileUrl(fileUrl, fallbackName, mimeType) {
+  if (!fileUrl) {
+    throw new Error('fileUrl is required');
+  }
+
+  const parsed = new URL(fileUrl, baseUrl());
+  const isLocal = ['localhost', '127.0.0.1', '0.0.0.0'].includes(parsed.hostname);
+  if (!isLocal) {
+    return parsed.toString();
+  }
+
+  const mergedMatch = parsed.pathname.match(/^\/merged\/([^/]+)\.glb$/i);
+  if (mergedMatch) {
+    const id = mergedMatch[1];
+    const buffer = mergedGlbs.get(id);
+    if (!buffer) throw new Error(`Generated model not found in memory: ${id}`);
+    return await uploadBufferToCatbox(buffer, `${id}.glb`, 'model/gltf-binary');
+  }
+
+  const spriteMatch = parsed.pathname.match(/^\/sprites\/([^/]+\.glb)$/i);
+  if (spriteMatch) {
+    const spriteName = decodeURIComponent(spriteMatch[1]);
+    const spritePath = path.join(SPRITES_DIR, spriteName);
+    if (!spritePath.startsWith(SPRITES_DIR) || !fs.existsSync(spritePath)) {
+      throw new Error(`Sprite model not found: ${spriteName}`);
+    }
+    return await uploadBufferToCatbox(fs.readFileSync(spritePath), spriteName, 'model/gltf-binary');
+  }
+
+  const previewMatch = parsed.pathname.match(/^\/previews\/([^/]+)\.png$/i);
+  if (previewMatch) {
+    const id = previewMatch[1];
+    const buffer = mergedPreviews.get(id);
+    if (!buffer) throw new Error(`Generated preview not found in memory: ${id}`);
+    return await uploadBufferToCatbox(buffer, `${id}.png`, 'image/png');
+  }
+
+  const response = await fetch(parsed.toString());
+  if (!response.ok) {
+    throw new Error(`Failed to fetch local file (${response.status})`);
+  }
+  return await uploadBufferToCatbox(Buffer.from(await response.arrayBuffer()), fallbackName, mimeType);
+}
+
+async function createCultsPlaceholderImage(name) {
+  const safeName = String(name || 'GodMode model').replace(/[<>&"]/g, '').slice(0, 80);
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="768">` +
+    `<rect width="100%" height="100%" fill="#17122b"/>` +
+    `<text x="50%" y="45%" text-anchor="middle" fill="#ffffff" font-family="Arial" font-size="56">GodMode 3D Model</text>` +
+    `<text x="50%" y="55%" text-anchor="middle" fill="#c4b5fd" font-family="Arial" font-size="30">${safeName}</text>` +
+    `</svg>`;
+  const buffer = await sharp(Buffer.from(svg)).png().toBuffer();
+  return await uploadBufferToCatbox(buffer, 'godmode-cults-preview.png', 'image/png');
+}
+
+app.post('/api/cults/share', async (req, res) => {
+  try {
+    const { modelUrl, fileUrl, previewImageUrl, imageUrl, name } = req.body || {};
+    const rawModelName = name || 'GodMode generated model.glb';
+    const uploadName = /\.glb$/i.test(rawModelName) ? rawModelName : `${rawModelName}.glb`;
+    const publicFileUrl = fileUrl || await resolvePublicFileUrl(modelUrl, uploadName, 'model/gltf-binary');
+    const publicImageUrl = imageUrl
+      || (previewImageUrl ? await resolvePublicFileUrl(previewImageUrl, `${rawModelName}.png`, 'image/png') : await createCultsPlaceholderImage(rawModelName));
+    const origin = process.env.CULTS_SHARE_ORIGIN || new URL(publicFileUrl).hostname;
+    const share = await cults.createShareUrl(publicFileUrl, origin);
+    const creation = await cults.createCreation({
+      name: rawModelName.replace(/\.glb$/i, '').replace(/[-_]+/g, ' ').slice(0, 80),
+      description: 'AI-generated 3D model created with GodMode.',
+      details: `Shared from GodMode.\n\nModel file: ${publicFileUrl}`,
+      fileUrl: publicFileUrl,
+      imageUrl: publicImageUrl
+    });
+    res.json({ ok: true, ...share, ...creation });
+  } catch (err) {
+    console.error('[cults/share] error:', err);
+    res.status(500).json({ ok: false, error: err.message || String(err) });
+  }
+});
+
 // Stable Fast 3D: single synchronous call, ~3-5 second turnaround.
 // Returns the GLB URL directly (no polling, no jobId machinery).
 app.post('/api/3d/stable-fast', async (req, res) => {
@@ -1018,8 +1125,7 @@ app.post('/api/3d/stable-fast', async (req, res) => {
     await maybeSendSmsWithCloudinaryLinks(cloud);
 
     // Save to sprites folder
-    const spritePath = path.join(SPRITES_DIR, filename);
-    fs.writeFileSync(spritePath, glbBuf);
+    const spritePath = saveSpriteGlb(filename, glbBuf);
     
     // CyStack: Log import event
     await cystack.scanner.logImport(filename, glbBuf, 'stable-fast');
@@ -1106,8 +1212,7 @@ app.post('/api/3d/triposr', async (req, res) => {
     await maybeSendSmsWithCloudinaryLinks(cloud);
 
     // Save to sprites folder
-    const spritePath = path.join(SPRITES_DIR, filename);
-    fs.writeFileSync(spritePath, glbBuf);
+    const spritePath = saveSpriteGlb(filename, glbBuf);
     
     // CyStack: Log import event
     await cystack.scanner.logImport(filename, glbBuf, 'triposr');
@@ -1215,8 +1320,7 @@ app.post('/api/3d/replicate-triposr', async (req, res) => {
     await maybeSendSmsWithCloudinaryLinks(cloud);
     
     // Save to sprites folder  
-    const spritePath = path.join(SPRITES_DIR, `${outId}.glb`);
-    fs.writeFileSync(spritePath, glbBuf);
+    const spritePath = saveSpriteGlb(`${outId}.glb`, glbBuf);
     
     const elapsedMs = Date.now() - startedAt;
     console.log(`[replicate-triposr] ${elapsedMs}ms (Replicate ${prediction.metrics && prediction.metrics.predict_time}s), saved to ${spritePath}`);

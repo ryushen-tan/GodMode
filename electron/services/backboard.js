@@ -1,13 +1,68 @@
-const { listFiles, readFile, writeFile, grepFiles, checkGodotErrors } = require('./fileEditor');
+const {
+  listFiles,
+  readFile,
+  writeFile,
+  restoreFileBackup,
+  isGodotMultiplayerInstalled,
+  makeGodotMultiplayer,
+  removeGodotMultiplayer,
+  sanitizeGodotContent,
+  validateGodotContent,
+  grepFiles,
+  checkGodotErrors,
+  addSpriteToMainScene
+} = require('./fileEditor');
 
 const BACKBOARD_API = 'https://app.backboard.io/api';
 
-const SYSTEM_PROMPT = `You are GodMode — an expert Godot 4 game development agent.
+// Reddit posting function (called from main.js with screenshot data)
+async function postToReddit(title, subreddit, screenshotBase64) {
+  try {
+    if (!screenshotBase64) {
+      throw new Error('No screenshot provided');
+    }
+
+    // Convert base64 to buffer
+    const base64Data = screenshotBase64.replace(/^data:image\/png;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    // Create form data
+    const formData = new FormData();
+    formData.append('screenshot', new Blob([buffer], { type: 'image/png' }), 'game-screenshot.png');
+    formData.append('title', title);
+    formData.append('subreddit', subreddit);
+
+    const response = await fetch('http://localhost:3001/api/reddit/post', {
+      method: 'POST',
+      body: formData
+    });
+    const result = await response.json();
+    if (response.ok) {
+      return {
+        success: true,
+        url: result.url,
+        postId: result.postId
+      };
+    }
+
+    return {
+      success: false,
+      error: result.error || 'Failed to post to Reddit'
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err.message
+    };
+  }
+}
+
+const SYSTEM_PROMPT = `You are GodMode — an expert Godot 4 game development agent with Reddit posting capabilities.
 
 CRITICAL: Your response MUST be ONLY valid JSON. No text before or after. No markdown. No code fences.
 CRITICAL: DO NOT use any tools or functions (like read_file or edit_file). You already have all necessary file contents in the prompt. You must output the final JSON directly in your response.
 
-Required JSON format:
+Required JSON format (for code changes):
 {
   "file": "relative/path/to/file.gd or .tscn",
   "content": "complete file content here",
@@ -15,7 +70,26 @@ Required JSON format:
   "thinking": "your reasoning process"
 }
 
-Rules:
+OR for Reddit posts:
+{
+  "action": "post_to_reddit",
+  "title": "Post title here",
+  "subreddit": "SOONHackathon",
+  "summary": "Posted screenshot to Reddit",
+  "thinking": "your reasoning"
+}
+
+Special Actions:
+- To post a screenshot to Reddit: Return {"action": "post_to_reddit", "title": "...", "subreddit": "SOONHackathon", "summary": "...", "thinking": "..."}
+- User can say things like "post a screenshot to reddit" or "share this on r/SOONHackathon"
+- To make the project multiplayer: Return {"action": "make_multiplayer", "summary": "Installed multiplayer support", "thinking": "..."}
+- To remove multiplayer from the project: Return {"action": "remove_multiplayer", "summary": "Removed multiplayer support", "thinking": "..."}
+- To open a second game window for multiplayer testing/showoff: Return {"action": "launch_multiplayer_demo", "summary": "Opened a second Godot instance", "thinking": "..."}
+- User can say things like "open another game window", "launch a second instance", or "show multiplayer"
+- To connect/join multiplayer from a second game window: Return {"action": "connect_multiplayer_demo", "summary": "Opened and connected a second Godot client", "thinking": "..."}
+- User can say things like "connect", "join multiplayer", "connect a second player", or "connect the client"
+
+Rules for Code Changes:
 - You can modify .gd (scripts) OR .tscn (scenes) files
 - For scene files (.tscn): modify existing nodes, don't remove essential elements
 - For adding walls/ramps/objects: modify the appropriate scene file (e.g., Levels/Main/L_Main.tscn)
@@ -34,6 +108,11 @@ Rules:
 - Maintain existing code style and structure
 - For Godot 4 GDScript: Use Time.get_ticks_msec() NOT OS.get_ticks_msec()
 - For Godot 4 GDScript: Use Input.get_vector() for WASD input
+- For Godot 4 multiplayer: NEVER use get_tree().has_multiplayer_peer(); SceneTree does not have this method. Use get_tree().multiplayer.multiplayer_peer != null or multiplayer.has_multiplayer_peer().
+- For Godot 4 multiplayer: Set peers with get_tree().multiplayer.multiplayer_peer = peer or multiplayer.multiplayer_peer = peer.
+- For Godot 4 multiplayer: Use multiplayer.is_server(), multiplayer.get_unique_id(), multiplayer.peer_connected, multiplayer.peer_disconnected, @rpc, is_multiplayer_authority(), and set_multiplayer_authority(peer_id).
+- For Godot 4 multiplayer: NEVER use Godot 3 APIs is_network_master(), set_network_master(), remote func, master func, puppet func, get_tree().network_peer, or get_tree().set_network_peer().
+- For Godot 4 signals: NEVER use old connect("signal", self, "_method") or connect("signal", "res://path.gd", "_method"). Use signal.connect(_method), e.g. multiplayer.peer_connected.connect(_on_peer_connected).
 - Return ONLY the JSON object, nothing else`;
 
 async function post(endpoint, apiKey, body) {
@@ -60,7 +139,7 @@ function extractKeywords(prompt) {
   return [...new Set(words.filter(w => !stopWords.has(w)))].slice(0, 5);
 }
 
-async function runAgent(prompt, apiKey, threadId, onStep) {
+async function runAgent(prompt, apiKey, threadId, onStep, captureScreenshot, launchMultiplayerDemo) {
   const MAX_RETRIES = 3;
   let currentThreadId = threadId;
   let lastError = null;
@@ -82,14 +161,120 @@ async function runAgent(prompt, apiKey, threadId, onStep) {
       // electron/services/backboard.js -> go up to electron/ -> up to root -> into example_game
       const spritesDir = path.join(__dirname, '..', '..', 'example_game', 'godot-FirstPersonStarter-main', 'sprites');
       let availableSprites = [];
+      let availableSpriteFiles = [];
       try {
-        availableSprites = fs.readdirSync(spritesDir)
+        availableSpriteFiles = fs.readdirSync(spritesDir)
           .filter(f => f.toLowerCase().endsWith('.glb'))
+          .map(f => ({ name: f, mtimeMs: fs.statSync(path.join(spritesDir, f)).mtimeMs }))
+          .sort((a, b) => b.mtimeMs - a.mtimeMs);
+        availableSprites = availableSpriteFiles
+          .map(({ name }) => name)
           .map(f => `res://sprites/${f}`);
         console.log(`[GodMode] Found ${availableSprites.length} sprites in ${spritesDir}`);
       } catch (err) {
         console.error('[GodMode] Could not list sprites:', err.message);
         console.error('[GodMode] Tried path:', spritesDir);
+      }
+
+      const spriteAddMatch = prompt.match(/res:\/\/sprites\/[^"'\s)]+\.glb/i);
+      const wantsSpritePlacement = /\b(add|place|put|insert|spawn|move|drop)\b/i.test(prompt)
+        && /\b(model|sprite|asset|object|glb|scene|godot|level|new|latest|generated|it|them)\b/i.test(prompt);
+      const wantsMultiplayerConnect = /^\s*(connect|join)\s*$/i.test(prompt)
+        || (/\b(connect|join)\b/i.test(prompt)
+          && /\b(multiplayer|server|host|client|game|instance|window|peer|localhost|second|player)\b/i.test(prompt));
+      const wantsMultiplayerDemoLaunch = /\b(open|launch|start|show|demo|test)\b/i.test(prompt)
+        && /\b(second|another|new|two|2|instance|window|client|multiplayer)\b/i.test(prompt)
+        && /\b(godot|game|instance|window|client|multiplayer)\b/i.test(prompt);
+      const wantsMakeMultiplayer = /\b(multiplayer|online|networked|networking)\b/i.test(prompt)
+        && /\b(make|add|enable|setup|set up|implement|turn on|create)\b/i.test(prompt);
+      const wantsRemoveMultiplayer = /\b(remove|disable|delete|strip|clear)\b/i.test(prompt)
+        && /\b(multiplayer|online|networked|networking)\b/i.test(prompt);
+
+      if (wantsRemoveMultiplayer) {
+        onStep && onStep({ type: 'tool_call', tool: 'remove_multiplayer', args: {} });
+        const removed = removeGodotMultiplayer();
+        onStep && onStep({ type: 'tool_result', tool: 'remove_multiplayer', output: removed.message });
+        onStep && onStep({ type: 'tool_call', tool: 'check_errors', args: {} });
+        const errorCheck = checkGodotErrors();
+        if (!errorCheck.success) throw new Error(`Godot validation failed after removing multiplayer:\n${errorCheck.error}`);
+        onStep && onStep({ type: 'tool_result', tool: 'check_errors', output: errorCheck.warning || '✓ No errors found!' });
+        return {
+          content: removed.message,
+          thread_id: currentThreadId,
+          filesChanged: removed.filesChanged
+        };
+      }
+
+      if (wantsMakeMultiplayer && !wantsMultiplayerConnect && !wantsMultiplayerDemoLaunch) {
+        onStep && onStep({ type: 'tool_call', tool: 'make_multiplayer', args: { host: '127.0.0.1', port: 4242 } });
+        const installed = makeGodotMultiplayer();
+        onStep && onStep({ type: 'tool_result', tool: 'make_multiplayer', output: installed.message });
+        onStep && onStep({ type: 'tool_call', tool: 'check_errors', args: {} });
+        const errorCheck = checkGodotErrors();
+        if (!errorCheck.success) {
+          restoreFileBackup(installed.filesChanged[0]);
+          throw new Error(`Godot validation failed after installing multiplayer:\n${errorCheck.error}`);
+        }
+        onStep && onStep({ type: 'tool_result', tool: 'check_errors', output: errorCheck.warning || '✓ No errors found!' });
+        return {
+          content: installed.message,
+          thread_id: currentThreadId,
+          filesChanged: installed.filesChanged
+        };
+      }
+
+      if ((wantsMultiplayerDemoLaunch || wantsMultiplayerConnect) && launchMultiplayerDemo) {
+        let installed = null;
+        if (wantsMakeMultiplayer || !isGodotMultiplayerInstalled()) {
+          onStep && onStep({ type: 'tool_call', tool: 'make_multiplayer', args: { host: '127.0.0.1', port: 4242 } });
+          installed = makeGodotMultiplayer();
+          onStep && onStep({ type: 'tool_result', tool: 'make_multiplayer', output: installed.message });
+          onStep && onStep({ type: 'tool_call', tool: 'check_errors', args: {} });
+          const errorCheck = checkGodotErrors();
+          if (!errorCheck.success) {
+            restoreFileBackup(installed.filesChanged[0]);
+            throw new Error(`Godot validation failed after installing multiplayer:\n${errorCheck.error}`);
+          }
+          onStep && onStep({ type: 'tool_result', tool: 'check_errors', output: errorCheck.warning || '✓ No errors found!' });
+        }
+        onStep && onStep({ type: 'tool_call', tool: 'connect_multiplayer_demo', args: { host: '127.0.0.1', port: 4242 } });
+        const launched = await launchMultiplayerDemo();
+        onStep && onStep({ type: 'tool_result', tool: 'connect_multiplayer_demo', output: launched.message });
+        return {
+          content: installed ? `${installed.message} ${launched.message}` : launched.message,
+          thread_id: currentThreadId,
+          filesChanged: installed?.filesChanged,
+          launchedMultiplayerDemo: true,
+          connectedMultiplayerDemo: true
+        };
+      }
+
+      const selectedSpritePath = spriteAddMatch?.[0] || (wantsSpritePlacement && availableSpriteFiles[0]
+        ? `res://sprites/${availableSpriteFiles[0].name}`
+        : null);
+
+      if (selectedSpritePath && (spriteAddMatch || wantsSpritePlacement)) {
+        const placementPrompt = spriteAddMatch
+          ? prompt
+          : `${prompt}\nAdd ${selectedSpritePath} to the scene at position (0, 2, 0)`;
+        onStep && onStep({ type: 'tool_call', tool: 'add_sprite_to_scene', args: { sprite: selectedSpritePath } });
+        const added = addSpriteToMainScene(placementPrompt);
+        onStep && onStep({ type: 'tool_result', tool: 'add_sprite_to_scene', output: added.message });
+
+        onStep && onStep({ type: 'tool_call', tool: 'check_errors', args: {} });
+        const errorCheck = checkGodotErrors();
+        if (!errorCheck.success) {
+          onStep && onStep({ type: 'tool_result', tool: 'check_errors', output: `✗ Errors found:\n${errorCheck.error}` });
+          throw new Error(`Godot validation failed after adding sprite:\n${errorCheck.error}`);
+        }
+
+        const msg = errorCheck.warning || '✓ No errors found!';
+        onStep && onStep({ type: 'tool_result', tool: 'check_errors', output: msg });
+        return {
+          content: added.message,
+          thread_id: currentThreadId,
+          filesChanged: [added.scenePath, ...(added.importCreated ? [`sprites/${added.spritePath.split('/').pop()}.import`] : [])],
+        };
       }
 
       // Step 2: Grep for relevant files based on prompt keywords
@@ -115,6 +300,21 @@ async function runAgent(prompt, apiKey, threadId, onStep) {
       const needsScene = sceneKeywords.some(kw => prompt.toLowerCase().includes(kw));
       if (needsScene && !filesToRead.some(f => f.includes('L_Main.tscn'))) {
         filesToRead.unshift('Levels/Main/L_Main.tscn');
+      }
+
+      const wantsMultiplayer = /\b(multiplayer|networked|networking|online|host|join|server|client|peer|lan)\b/i.test(prompt);
+      if (wantsMultiplayer) {
+        for (const fp of [
+          'project.godot',
+          'Levels/Main/L_Main.tscn',
+          'Levels/Main/L_Main.gd',
+          'Player/Player.tscn',
+          'Player/MovementController.gd',
+          'Player/Head.gd',
+          'Player/Sprint.gd'
+        ]) {
+          if (!filesToRead.includes(fp)) filesToRead.push(fp);
+        }
       }
       
       // Always include MovementController.gd if nothing else matched — it handles most gameplay
@@ -226,6 +426,95 @@ async function runAgent(prompt, apiKey, threadId, onStep) {
         throw new Error(`LLM returned invalid JSON. Last error: ${lastParseError}. Response preview: ${raw.slice(0, 300)}`);
       }
 
+      if (parsed.action === 'make_multiplayer' || parsed.action === 'remove_multiplayer') {
+        if (parsed.thinking) {
+          onStep && onStep({ type: 'thinking', text: parsed.thinking });
+        }
+        const toolName = parsed.action;
+        onStep && onStep({ type: 'tool_call', tool: toolName, args: {} });
+        const result = parsed.action === 'make_multiplayer' ? makeGodotMultiplayer() : removeGodotMultiplayer();
+        onStep && onStep({ type: 'tool_result', tool: toolName, output: result.message });
+        onStep && onStep({ type: 'tool_call', tool: 'check_errors', args: {} });
+        const errorCheck = checkGodotErrors();
+        if (!errorCheck.success) throw new Error(`Godot validation failed after ${toolName}:\n${errorCheck.error}`);
+        onStep && onStep({ type: 'tool_result', tool: 'check_errors', output: errorCheck.warning || '✓ No errors found!' });
+        return {
+          content: parsed.summary || result.message,
+          thread_id: currentThreadId,
+          filesChanged: result.filesChanged
+        };
+      }
+
+      if (parsed.action === 'launch_multiplayer_demo' || parsed.action === 'connect_multiplayer_demo') {
+        if (!launchMultiplayerDemo) {
+          throw new Error('Multiplayer demo launch function not available');
+        }
+        if (parsed.thinking) {
+          onStep && onStep({ type: 'thinking', text: parsed.thinking });
+        }
+        let installed = null;
+        if (!isGodotMultiplayerInstalled()) {
+          onStep && onStep({ type: 'tool_call', tool: 'make_multiplayer', args: { host: '127.0.0.1', port: 4242 } });
+          installed = makeGodotMultiplayer();
+          onStep && onStep({ type: 'tool_result', tool: 'make_multiplayer', output: installed.message });
+          onStep && onStep({ type: 'tool_call', tool: 'check_errors', args: {} });
+          const errorCheck = checkGodotErrors();
+          if (!errorCheck.success) throw new Error(`Godot validation failed after installing multiplayer:\n${errorCheck.error}`);
+          onStep && onStep({ type: 'tool_result', tool: 'check_errors', output: errorCheck.warning || '✓ No errors found!' });
+        }
+        const toolName = parsed.action === 'connect_multiplayer_demo' ? 'connect_multiplayer_demo' : 'launch_multiplayer_demo';
+        onStep && onStep({ type: 'tool_call', tool: toolName, args: { host: '127.0.0.1', port: 4242 } });
+        const launched = await launchMultiplayerDemo();
+        onStep && onStep({ type: 'tool_result', tool: toolName, output: launched.message });
+        return {
+          content: parsed.summary || (installed ? `${installed.message} ${launched.message}` : launched.message),
+          thread_id: currentThreadId,
+          filesChanged: installed?.filesChanged,
+          launchedMultiplayerDemo: true,
+          connectedMultiplayerDemo: parsed.action === 'connect_multiplayer_demo'
+        };
+      }
+
+      // Check if this is a Reddit post action
+      if (parsed.action === 'post_to_reddit') {
+        if (!parsed.title || !parsed.subreddit) {
+          throw new Error('Reddit post requires title and subreddit');
+        }
+
+        if (!captureScreenshot) {
+          throw new Error('Screenshot capture function not available');
+        }
+
+        // Show thinking if provided
+        if (parsed.thinking) {
+          onStep && onStep({ type: 'thinking', text: parsed.thinking });
+        }
+
+        // Capture screenshot via callback
+        onStep && onStep({ type: 'tool_call', tool: 'capture_screenshot', args: {} });
+        const screenshot = await captureScreenshot();
+        if (!screenshot) {
+          throw new Error('Failed to capture screenshot');
+        }
+        onStep && onStep({ type: 'tool_result', tool: 'capture_screenshot', output: '✓ Screenshot captured' });
+
+        // Post to Reddit
+        onStep && onStep({ type: 'tool_call', tool: 'post_to_reddit', args: { title: parsed.title, subreddit: parsed.subreddit } });
+        const redditResult = await postToReddit(parsed.title, parsed.subreddit, screenshot);
+        
+        if (redditResult.success) {
+          onStep && onStep({ type: 'tool_result', tool: 'post_to_reddit', output: `✓ Posted to r/${parsed.subreddit}: ${redditResult.url}` });
+          return {
+            content: parsed.summary || `Posted screenshot to r/${parsed.subreddit}`,
+            thread_id: currentThreadId,
+            redditUrl: redditResult.url,
+          };
+        } else {
+          throw new Error(`Failed to post to Reddit: ${redditResult.error}`);
+        }
+      }
+
+      // Standard file modification flow
       if (!parsed.file || !parsed.content) {
         throw new Error(`LLM response missing required fields: ${JSON.stringify(parsed).slice(0, 200)}`);
       }
@@ -236,7 +525,13 @@ async function runAgent(prompt, apiKey, threadId, onStep) {
       }
 
       onStep && onStep({ type: 'tool_call', tool: 'write_file', args: { path: parsed.file } });
-      writeFile(parsed.file, parsed.content);
+      const sanitizedContent = sanitizeGodotContent(parsed.file, parsed.content);
+      const validation = validateGodotContent(parsed.file, sanitizedContent);
+      if (!validation.success) {
+        lastError = validation.error;
+        throw new Error(validation.error);
+      }
+      writeFile(parsed.file, sanitizedContent);
       onStep && onStep({ type: 'tool_result', tool: 'write_file', output: `Written: ${parsed.file}` });
 
       // Step 6: Check for Godot errors
@@ -253,6 +548,10 @@ async function runAgent(prompt, apiKey, threadId, onStep) {
         };
       } else {
         onStep && onStep({ type: 'tool_result', tool: 'check_errors', output: `✗ Errors found:\n${errorCheck.error}` });
+        const restored = restoreFileBackup(parsed.file);
+        if (restored) {
+          onStep && onStep({ type: 'tool_result', tool: 'restore_file', output: `Restored previous version of ${parsed.file}` });
+        }
         lastError = errorCheck.error;
         
         if (attempt === MAX_RETRIES) {

@@ -16,10 +16,17 @@
     <img src="godmodlogo.png" alt="GodMode" class="add-logo" draggable="false">
   </div>
 
-  <!-- Export to X Button -->
-  <button id="export-to-x-btn" class="export-x-btn" title="Export screenshot to X (Twitter)">
+  <!-- Export to Reddit Button -->
+  <button id="export-to-reddit-btn" class="export-reddit-btn" title="Export screenshot to Reddit">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+      <path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 0 1-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 0 1 .042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 0 1 4.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 0 1 .14-.197.35.35 0 0 1 .238-.042l2.906.617a1.214 1.214 0 0 1 1.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 0 0-.231.094.33.33 0 0 0 0 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 0 0 .029-.463.33.33 0 0 0-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 0 0-.232-.095z"/>
+    </svg>
+  </button>
+
+  <!-- Share to Cults3D Button -->
+  <button id="share-to-cults-btn" class="share-cults-btn" title="Generate a 3D model first to share to Cults3D" disabled>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 2 3 6.5v11L12 22l9-4.5v-11L12 2Zm0 2.25 5.91 2.95L12 10.15 6.09 7.2 12 4.25ZM5 8.82l6 3v7.36l-6-3V8.82Zm14 7.36-6 3v-7.36l6-3v7.36Z"/>
     </svg>
   </button>
 
@@ -159,6 +166,9 @@
       <button id="submit-prompt-btn" class="submit-btn">
         <span id="submit-label">Run Agent</span>
       </button>
+      <button id="multiplayer-demo-btn" class="upload-button" title="Open and connect a second Godot client">
+        Connect 2nd Player
+      </button>
     </div>
 
     <div id="agent-result" class="agent-result" style="display:none;"></div>
@@ -219,6 +229,87 @@
         style="display:none; width:100%; height:260px; background:rgba(0,0,0,0.4); border-radius:8px; margin-top:8px;">
       </model-viewer>
       <div id="result-model" class="result-model"></div>
+    </div>
+  </div>
+
+  <!-- Centered glassmorphism modal: triggered by Cmd+Shift+A screenshot flow -->
+  <div id="shot-modal" class="shot-modal hidden" aria-hidden="true">
+    <div class="shot-glass">
+      <div class="shot-stage" data-stage="confirm">
+        <div class="shot-canvas-wrap shot-preview-wrap">
+          <img id="shot-preview" alt="">
+        </div>
+        <div class="shot-actions">
+          <button class="shot-btn shot-btn-secondary" data-shot-action="cancel">Cancel</button>
+          <button class="shot-btn shot-btn-primary"   data-shot-action="confirm">Use this</button>
+        </div>
+      </div>
+
+      <div class="shot-stage" data-stage="draw" hidden>
+        <div class="shot-canvas-wrap" id="shot-canvas-wrap">
+          <canvas id="shot-canvas" width="1024" height="1024"></canvas>
+          <svg class="shot-beam" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+            <rect class="shot-beam-head" x="0" y="0" width="100%" height="100%" pathLength="100"
+                  fill="none" stroke="white" stroke-width="2.5"
+                  vector-effect="non-scaling-stroke" stroke-linecap="round"></rect>
+          </svg>
+        </div>
+        <div class="shot-tools">
+          <button class="shot-tool active" data-shot-tool="pen" title="Pen">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+              <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+            </svg>
+          </button>
+          <button class="shot-tool" data-shot-tool="eraser" title="Eraser">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 20H7L3 16 13 6l7 7z"></path>
+            </svg>
+          </button>
+          <input type="color" id="shot-color" value="#ff3b30" title="Color">
+          <input type="range" id="shot-size" min="1" max="60" value="10" title="Brush size">
+          <button class="shot-tool" data-shot-tool="clear" title="Clear drawings">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="shot-actions shot-actions-inline">
+          <input type="text" id="shot-prompt" class="shot-prompt-input" placeholder="Optional prompt…">
+          <button class="shot-btn shot-btn-secondary" data-shot-action="cancel">Cancel</button>
+          <button class="shot-btn shot-btn-primary"   data-shot-action="generate-2d">Generate 2D</button>
+        </div>
+        <div class="shot-status" id="shot-status"></div>
+      </div>
+
+      <div class="shot-stage" data-stage="result" hidden>
+        <div class="shot-canvas-wrap shot-preview-wrap">
+          <img id="shot-result-img" alt="">
+          <svg class="shot-beam" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+            <rect class="shot-beam-head" x="0" y="0" width="100%" height="100%" pathLength="100"
+                  fill="none" stroke="white" stroke-width="2.5"
+                  vector-effect="non-scaling-stroke" stroke-linecap="round"></rect>
+          </svg>
+        </div>
+        <div class="shot-3d-viewer-wrap" hidden>
+          <model-viewer
+            id="shot-3d-viewer"
+            camera-controls auto-rotate
+            shadow-intensity="1" exposure="1"
+            style="width:100%; height:320px; background:rgba(0,0,0,0.35); border-radius:14px;">
+          </model-viewer>
+        </div>
+        <div class="shot-actions">
+          <select id="shot-3d-provider" class="shot-select" title="3D provider">
+            <option value="stable-fast">Stable Fast (~3s)</option>
+            <option value="meshy">Meshy (1–3 min)</option>
+          </select>
+          <button class="shot-btn shot-btn-secondary" data-shot-action="back-to-draw">Back</button>
+          <button class="shot-btn shot-btn-primary"   data-shot-action="generate-3d">Generate 3D</button>
+        </div>
+        <div class="shot-status" id="shot-status-result"></div>
+      </div>
     </div>
   </div>
 

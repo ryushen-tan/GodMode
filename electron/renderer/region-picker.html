@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Select Region</title>
+<style>
+  html, body { margin:0; padding:0; overflow:hidden; user-select:none;
+               cursor:crosshair; background:#000;
+               font:13px -apple-system, BlinkMacSystemFont, sans-serif; color:#fff; }
+  #shot { position:fixed; inset:0; width:100vw; height:100vh; -webkit-user-drag:none; }
+  #dim  { position:fixed; inset:0; background:rgba(0,0,0,0.45); pointer-events:none; }
+  #sel  { position:fixed; border:2px solid #3b82f6;
+          box-shadow:0 0 0 100000px rgba(0,0,0,0.45);
+          display:none; pointer-events:none; }
+  #hint { position:fixed; top:18px; left:50%; transform:translateX(-50%);
+          background:rgba(0,0,0,0.78); padding:8px 14px; border-radius:8px;
+          pointer-events:none; }
+  #size { position:fixed; background:rgba(0,0,0,0.78); padding:4px 8px;
+          border-radius:6px; font-size:12px; display:none; pointer-events:none; }
+</style>
+</head>
+<body>
+  <img id="shot" alt="">
+  <div id="dim"></div>
+  <div id="sel"></div>
+  <div id="hint">Drag to select a region · Esc to cancel</div>
+  <div id="size"></div>
+<script>
+  const shot = document.getElementById('shot');
+  const sel  = document.getElementById('sel');
+  const dim  = document.getElementById('dim');
+  const sizeLabel = document.getElementById('size');
+
+  const params = new URLSearchParams(location.search);
+  const sourceSrc = params.get('src');
+  if (sourceSrc) shot.src = sourceSrc;
+
+  let startX = 0, startY = 0, endX = 0, endY = 0;
+  let dragging = false;
+
+  function rect() {
+    const x = Math.min(startX, endX);
+    const y = Math.min(startY, endY);
+    const w = Math.abs(endX - startX);
+    const h = Math.abs(endY - startY);
+    return { x, y, w, h };
+  }
+
+  function paint() {
+    const r = rect();
+    if (r.w < 2 || r.h < 2) {
+      sel.style.display = 'none';
+      sizeLabel.style.display = 'none';
+      dim.style.display = 'block';
+      return;
+    }
+    dim.style.display = 'none';
+    sel.style.display = 'block';
+    sel.style.left   = r.x + 'px';
+    sel.style.top    = r.y + 'px';
+    sel.style.width  = r.w + 'px';
+    sel.style.height = r.h + 'px';
+    const sx = shot.naturalWidth / window.innerWidth || 1;
+    const sy = shot.naturalHeight / window.innerHeight || 1;
+    sizeLabel.textContent = `${Math.round(r.w * sx)} × ${Math.round(r.h * sy)}`;
+    sizeLabel.style.left = (r.x + r.w + 8) + 'px';
+    sizeLabel.style.top  = (r.y + r.h + 8) + 'px';
+    sizeLabel.style.display = 'block';
+  }
+
+  window.addEventListener('mousedown', (e) => {
+    dragging = true;
+    startX = e.clientX; startY = e.clientY;
+    endX = e.clientX;   endY = e.clientY;
+    paint();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    endX = e.clientX; endY = e.clientY;
+    paint();
+  });
+
+  window.addEventListener('mouseup', (e) => {
+    if (!dragging) return;
+    dragging = false;
+    endX = e.clientX; endY = e.clientY;
+    const r = rect();
+    if (r.w >= 4 && r.h >= 4) {
+      confirmSelection(r);
+    } else {
+      paint();
+    }
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') window.regionPickerAPI.cancel();
+  });
+
+  function confirmSelection(r) {
+    const sx = shot.naturalWidth / window.innerWidth;
+    const sy = shot.naturalHeight / window.innerHeight;
+    const cx = Math.max(0, Math.round(r.x * sx));
+    const cy = Math.max(0, Math.round(r.y * sy));
+    const cw = Math.min(shot.naturalWidth  - cx, Math.round(r.w * sx));
+    const ch = Math.min(shot.naturalHeight - cy, Math.round(r.h * sy));
+    const c = document.createElement('canvas');
+    c.width = cw; c.height = ch;
+    c.getContext('2d').drawImage(shot, cx, cy, cw, ch, 0, 0, cw, ch);
+    window.regionPickerAPI.confirm(c.toDataURL('image/png'));
+  }
+</script>
+</body>
+</html>

@@ -3,26 +3,26 @@ class_name MovementController
 
 
 @export var gravity_multiplier := 3.0
-@export var speed := 3  # Further reduced speed for slower running
-@export var acceleration := 8
-@export var deceleration := 10
+@export var speed := 5  # Decreased speed
+@export var acceleration := 10  # Decreased acceleration
+@export var deceleration := 5  # Decreased deceleration
 @export_range(0.0, 1.0, 0.05) var air_control := 0.3
-@export var jump_height := 15  # Further reduced jump height
+@export var jump_height := 10  # Decreased jump height
 var direction := Vector3()
 var input_axis := Vector2()
 # Get the gravity from the project settings to be synced with RigidDynamicBody nodes.
-@onready var gravity: float = (ProjectSettings.get_setting("physics/3d/default_gravity") 
+@onready var gravity: float = (ProjectSettings.get_setting("physics/3d/default_gravity")
 		* gravity_multiplier)
 
 
 # Called every physics tick. 'delta' is constant
 func _physics_process(delta: float) -> void:
-	input_axis = Input.get_vector(&"move_back", &"move_forward",
-			&"move_left", &"move_right")
+	input_axis = Input.get_vector("move_back", "move_forward",
+			"move_left", "move_right")
 	direction_input()
 	
 	if is_on_floor():
-		if Input.is_action_just_pressed(&"jump"):
+		if Input.is_action_just_pressed("jump"):
 			velocity.y = jump_height
 	else:
 		velocity.y -= gravity * delta
