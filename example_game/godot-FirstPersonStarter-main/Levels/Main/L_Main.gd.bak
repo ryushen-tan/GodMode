@@ -1,49 +1,302 @@
-extends Node3D
+extends Node
 
-#-----------------SCENE--SCRIPT------------------#
-#    Close your game faster by clicking 'Esc'    #
-#   Change mouse mode by clicking 'Shift + F1'   #
-#------------------------------------------------#
+const GODMODE_MULTIPLAYER_ENABLED := true
+const MULTIPLAYER_HOST := "127.0.0.1"
+const STATE_SEND_INTERVAL := 0.05
+const FILE_SYNC_STALE_SECONDS := 5.0
 
-@export var fast_close := true
+var multiplayer_port := 4242
+var network_peer: ENetMultiplayerPeer
+var remote_avatars := {}
+var state_send_timer := 0.0
+var is_client_instance := false
+var test_log_path := ""
+var file_sync_id := ""
+var file_sync_path := ""
+@onready var local_player := get_node_or_null("Player") as Node3D
+@onready var remote_players_root := Node3D.new()
 
-# Called when the node enters the scene tree for the first time.
+
 func _ready() -> void:
-	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-	
-	if !OS.is_debug_build():
-		fast_close = false
-	
-	if fast_close:
-		print("** Fast Close enabled in the 'L_Main.gd' script **")
-		print("** 'Esc' to close 'Shift + F1' to release mouse **")
-	
-	set_process_input(fast_close)
+	remote_players_root.name = "RemotePlayers"
+	add_child(remote_players_root)
+	multiplayer_port = _get_cmdline_port()
+	test_log_path = _get_cmdline_value("--godmode-test-log=")
+
+	is_client_instance = "--godmode-client" in OS.get_cmdline_user_args()
+	file_sync_id = ("client_%s" if is_client_instance else "host_%s") % OS.get_process_id()
+	file_sync_path = "/tmp/godmode_multiplayer_state_%s.json" % multiplayer_port
+	if is_client_instance:
+		_offset_client_player()
+
+	if is_client_instance:
+		connect_to_host()
+	else:
+		host_game()
 
 
-func _input(event: InputEvent) -> void:
-	if event.is_action_pressed(&"ui_cancel"):
-		# Toggle mouse capture so you can tab out / click UI.
-		match Input.get_mouse_mode():
-			Input.MOUSE_MODE_CAPTURED:
-				Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-			_:
-				Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-		get_viewport().set_input_as_handled()
-	
-	if event.is_action_pressed(&"change_mouse_input"):
-		match Input.get_mouse_mode():
-			Input.MOUSE_MODE_CAPTURED:
-				Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-			Input.MOUSE_MODE_VISIBLE:
-				Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+func _physics_process(delta: float) -> void:
+	if local_player == null:
+		return
+
+	state_send_timer -= delta
+	if state_send_timer > 0.0:
+		return
+
+	state_send_timer = STATE_SEND_INTERVAL
+	_sync_file_multiplayer()
+
+	if multiplayer.multiplayer_peer == null:
+		return
+
+	if multiplayer.is_server():
+		rpc("_receive_player_state", multiplayer.get_unique_id(), local_player.global_position, local_player.global_rotation.y)
+	else:
+		rpc_id(1, "_submit_player_state", local_player.global_position, local_player.global_rotation.y)
 
 
-# Capture mouse if clicked on the game, needed for HTML5
-# Called when an InputEvent hasn't been consumed by _input() or any GUI item
-func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
-			if event.button_index == MOUSE_BUTTON_LEFT && event.pressed:
-				# Only recapture on click if the window is focused.
-				if DisplayServer.window_is_focused():
-					Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+func host_game() -> void:
+	if multiplayer.multiplayer_peer != null:
+		return
+
+	network_peer = ENetMultiplayerPeer.new()
+	var error := network_peer.create_server(multiplayer_port, 8)
+	if error != OK:
+		push_warning("GodMode multiplayer host failed on port %s: %s" % [multiplayer_port, error])
+		is_client_instance = true
+		_offset_client_player()
+		connect_to_host()
+		return
+
+	multiplayer.multiplayer_peer = network_peer
+	multiplayer.peer_connected.connect(_on_peer_connected)
+	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	_test_log("host_listening")
+	print("GodMode multiplayer host listening on port %s" % multiplayer_port)
+
+
+func connect_to_host(host := MULTIPLAYER_HOST) -> void:
+	if multiplayer.multiplayer_peer != null:
+		return
+
+	network_peer = ENetMultiplayerPeer.new()
+	var error := network_peer.create_client(host, multiplayer_port)
+	if error != OK:
+		push_warning("GodMode multiplayer client failed to start: %s" % error)
+		return
+
+	multiplayer.multiplayer_peer = network_peer
+	multiplayer.connected_to_server.connect(_on_connected_to_server)
+	multiplayer.connection_failed.connect(_on_connection_failed)
+	multiplayer.server_disconnected.connect(_on_server_disconnected)
+	_test_log("client_connecting")
+	print("GodMode multiplayer client connecting to %s:%s" % [host, multiplayer_port])
+
+
+func _on_peer_connected(peer_id: int) -> void:
+	var avatar := _ensure_remote_avatar(peer_id)
+	avatar.global_position = _default_remote_position(peer_id)
+	avatar.global_rotation = Vector3(0, PI, 0)
+	_test_log("peer_connected:%s" % peer_id)
+	print("GodMode multiplayer peer connected: %s" % peer_id)
+
+
+func _on_peer_disconnected(peer_id: int) -> void:
+	print("GodMode multiplayer peer disconnected: %s" % peer_id)
+	_remove_remote_avatar(peer_id)
+
+
+func _on_connected_to_server() -> void:
+	_offset_client_player()
+	var host_avatar := _ensure_remote_avatar(1)
+	host_avatar.global_position = Vector3(0, 2.7, 0)
+	host_avatar.global_rotation = Vector3.ZERO
+	_test_log("client_connected")
+	print("GodMode multiplayer client connected")
+
+
+func _on_connection_failed() -> void:
+	push_warning("GodMode multiplayer client connection failed")
+
+
+func _on_server_disconnected() -> void:
+	push_warning("GodMode multiplayer server disconnected")
+	for peer_id in remote_avatars.keys():
+		_remove_remote_avatar(peer_id)
+
+
+@rpc("any_peer", "unreliable")
+func _submit_player_state(position: Vector3, rotation_y: float) -> void:
+	if not multiplayer.is_server():
+		return
+
+	var peer_id: int = multiplayer.get_remote_sender_id()
+	_receive_player_state(peer_id, position, rotation_y)
+	rpc("_receive_player_state", peer_id, position, rotation_y)
+
+
+@rpc("any_peer", "unreliable")
+func _receive_player_state(peer_id: int, position: Vector3, rotation_y: float) -> void:
+	if peer_id == multiplayer.get_unique_id():
+		return
+
+	var avatar := _ensure_remote_avatar(peer_id)
+	avatar.global_position = position + Vector3(0, 0.7, 0)
+	avatar.global_rotation = Vector3(0, rotation_y, 0)
+
+
+func _sync_file_multiplayer() -> void:
+	var states := _read_file_sync_states()
+	var now := Time.get_unix_time_from_system()
+	states[file_sync_id] = {
+		"position": [local_player.global_position.x, local_player.global_position.y, local_player.global_position.z],
+		"rotation_y": local_player.global_rotation.y,
+		"time": now
+	}
+
+	var active_remote_ids := {}
+	for peer_key in states.keys():
+		var entry = states[peer_key]
+		if typeof(entry) != TYPE_DICTIONARY:
+			continue
+		if now - float(entry.get("time", 0.0)) > FILE_SYNC_STALE_SECONDS:
+			states.erase(peer_key)
+			continue
+		if peer_key == file_sync_id:
+			continue
+		var raw_position = entry.get("position", [])
+		if typeof(raw_position) != TYPE_ARRAY or raw_position.size() < 3:
+			continue
+		var position := Vector3(float(raw_position[0]), float(raw_position[1]), float(raw_position[2]))
+		var rotation_y := float(entry.get("rotation_y", 0.0))
+		_receive_file_player_state(peer_key, position, rotation_y)
+		active_remote_ids[peer_key] = true
+
+	for peer_key in remote_avatars.keys():
+		if typeof(peer_key) == TYPE_STRING and not active_remote_ids.has(peer_key):
+			_remove_remote_avatar(peer_key)
+
+	var file := FileAccess.open(file_sync_path, FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(states))
+
+
+func _read_file_sync_states() -> Dictionary:
+	if file_sync_path == "" or not FileAccess.file_exists(file_sync_path):
+		return {}
+	var file := FileAccess.open(file_sync_path, FileAccess.READ)
+	if not file:
+		return {}
+	var parsed = JSON.parse_string(file.get_as_text())
+	if typeof(parsed) == TYPE_DICTIONARY:
+		return parsed
+	return {}
+
+
+func _receive_file_player_state(peer_key: String, position: Vector3, rotation_y: float) -> void:
+	var avatar := _ensure_remote_avatar(peer_key)
+	avatar.global_position = position + Vector3(0, 0.7, 0)
+	avatar.global_rotation = Vector3(0, rotation_y, 0)
+
+
+func _ensure_remote_avatar(peer_id) -> Node3D:
+	if remote_avatars.has(peer_id):
+		return remote_avatars[peer_id]
+
+	var avatar := Node3D.new()
+	avatar.name = "RemotePlayer%s" % peer_id
+
+	var avocado_scene := load("res://sprites/Avocado.glb") as PackedScene
+	if avocado_scene:
+		var avocado := avocado_scene.instantiate() as Node3D
+		avocado.name = "AvocadoModel"
+		avocado.scale = Vector3(2.0, 2.0, 2.0)
+		avatar.add_child(avocado)
+		_enable_avatar_shadows(avocado)
+	else:
+		avatar.add_child(_make_fallback_avatar_box())
+
+	remote_players_root.add_child(avatar)
+	remote_avatars[peer_id] = avatar
+	_test_log("remote_avatar_created:%s" % peer_id)
+	print("GodMode visible Avocado player model created for peer %s" % peer_id)
+	return avatar
+
+
+func _make_fallback_avatar_box() -> MeshInstance3D:
+	var box := MeshInstance3D.new()
+	box.name = "FallbackPlayerBox"
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(1.0, 2.0, 1.0)
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.0, 0.85, 1.0, 1.0)
+	material.emission_enabled = true
+	material.emission = Color(0.0, 0.45, 1.0, 1.0)
+	material.emission_energy_multiplier = 1.5
+	mesh.material = material
+	box.mesh = mesh
+	box.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	return box
+
+
+func _enable_avatar_shadows(node: Node) -> void:
+	if node is GeometryInstance3D:
+		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	for child in node.get_children():
+		_enable_avatar_shadows(child)
+
+
+func _remove_remote_avatar(peer_id) -> void:
+	if not remote_avatars.has(peer_id):
+		return
+
+	var avatar: Node = remote_avatars[peer_id]
+	remote_avatars.erase(peer_id)
+	avatar.queue_free()
+
+
+func _offset_client_player() -> void:
+	if local_player == null:
+		return
+
+	var id: int = multiplayer.get_unique_id()
+	var lane := 1
+	if id > 1:
+		lane = int(id % 4) + 1
+	local_player.global_position = Vector3((lane - 2) * 2.0, local_player.global_position.y, -5.0 - lane)
+	local_player.global_rotation = Vector3(0, PI, 0)
+
+
+func _default_remote_position(peer_id: int) -> Vector3:
+	var lane := int(peer_id % 4) + 1
+	return Vector3((lane - 2) * 2.0, 2.7, -5.0 - lane)
+
+
+func _get_cmdline_port() -> int:
+	var raw := _get_cmdline_value("--godmode-port=")
+	if raw != "":
+		var value := raw.to_int()
+		if value > 0:
+			return value
+	return 4242
+
+
+func _get_cmdline_value(prefix: String) -> String:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with(prefix):
+			return arg.trim_prefix(prefix)
+	return ""
+
+
+func _test_log(message: String) -> void:
+	if test_log_path == "":
+		return
+
+	var file := FileAccess.open(test_log_path, FileAccess.WRITE)
+	if file:
+		file.store_line(message)
+
+
+func _input(event):
+	if event.is_action_pressed("ui_cancel"):
+		get_tree().quit()

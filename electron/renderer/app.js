@@ -14,6 +14,7 @@ const statusDot       = document.getElementById('status-dot');
 const promptInput     = document.getElementById('prompt-input');
 const submitBtn       = document.getElementById('submit-prompt-btn');
 const submitLabel     = document.getElementById('submit-label');
+const multiplayerDemoBtn = document.getElementById('multiplayer-demo-btn');
 const agentLog        = document.getElementById('agent-log');
 const agentSteps      = document.getElementById('agent-steps');
 const agentResult     = document.getElementById('agent-result');
@@ -327,6 +328,27 @@ submitBtn.addEventListener('click', async () => {
   }
 });
 
+if (multiplayerDemoBtn) {
+  multiplayerDemoBtn.addEventListener('click', async () => {
+    multiplayerDemoBtn.disabled = true;
+    const originalText = multiplayerDemoBtn.textContent;
+    multiplayerDemoBtn.textContent = 'Opening…';
+    try {
+      const result = await window.electronAPI.launchMultiplayerDemo();
+      agentResult.style.display = 'block';
+      agentResult.className = result.success === false ? 'agent-result error' : 'agent-result';
+      agentResult.textContent = result.message || 'Opened a second Godot game window.';
+    } catch (err) {
+      agentResult.style.display = 'block';
+      agentResult.className = 'agent-result error';
+      agentResult.textContent = `Error: ${err.message}`;
+    } finally {
+      multiplayerDemoBtn.disabled = false;
+      multiplayerDemoBtn.textContent = originalText;
+    }
+  });
+}
+
 penTool.addEventListener('click', () => {
   currentTool = 'pen';
   penTool.classList.add('active');
@@ -410,6 +432,354 @@ document.addEventListener('paste', async (e) => {
 
 // Most recent base image drawn to the canvas (used to compute inpaint mask).
 let baseImageData = null;
+
+// ============================================================================
+// Screenshot modal flow (Cmd+Shift+A → confirm → draw → 2D → 3D)
+// ============================================================================
+
+const shotModal       = document.getElementById('shot-modal');
+const shotPreview     = document.getElementById('shot-preview');
+const shotCanvas      = document.getElementById('shot-canvas');
+const shotResultImg   = document.getElementById('shot-result-img');
+const shotStatusEl    = document.getElementById('shot-status');
+const shotStatusResEl = document.getElementById('shot-status-result');
+const shotColor       = document.getElementById('shot-color');
+const shotSizeRange   = document.getElementById('shot-size');
+const shotPromptInput = document.getElementById('shot-prompt');
+const shot3dViewer    = document.getElementById('shot-3d-viewer');
+const shot3dViewerWrap = shot3dViewer ? shot3dViewer.parentElement : null;
+
+const shotState = {
+  capturedDataUrl: null,
+  resultImageUrl: null,
+  resultImageUrlForBackend: null,
+  tool: 'pen',
+};
+const shotCtx = shotCanvas ? shotCanvas.getContext('2d') : null;
+if (shotCtx) { shotCtx.lineCap = 'round'; shotCtx.lineJoin = 'round'; }
+
+function showShotStage(name) {
+  if (!shotModal) return;
+  shotModal.querySelectorAll('.shot-stage').forEach((el) => {
+    el.hidden = el.dataset.stage !== name;
+  });
+  // Always reset beams when switching stage
+  shotModal.querySelectorAll('.shot-beam').forEach((b) => b.classList.remove('active'));
+  if (shotStatusEl)    shotStatusEl.textContent    = '';
+  if (shotStatusResEl) shotStatusResEl.textContent = '';
+}
+
+function openShotModal() {
+  if (!shotModal) return;
+  shotModal.classList.remove('hidden');
+  shotModal.setAttribute('aria-hidden', 'false');
+  setPassthrough(false);
+}
+
+function closeShotModal() {
+  if (!shotModal) return;
+  shotModal.classList.add('hidden');
+  shotModal.setAttribute('aria-hidden', 'true');
+  setPassthrough(true);
+  shotState.capturedDataUrl = null;
+  shotState.resultImageUrl = null;
+  shotState.resultImageUrlForBackend = null;
+  if (shot3dViewerWrap) shot3dViewerWrap.hidden = true;
+  if (shot3dViewer) shot3dViewer.removeAttribute('src');
+}
+
+// Resize the shot canvas to the screenshot's aspect ratio so there's no
+// white padding when we draw the screenshot into it.
+function resetShotCanvasToImage(img) {
+  if (!shotCtx || !shotCanvas) return;
+  const maxDim = 1024;
+  let w = img.naturalWidth, h = img.naturalHeight;
+  if (w > maxDim || h > maxDim) {
+    const s = maxDim / Math.max(w, h);
+    w = Math.round(w * s);
+    h = Math.round(h * s);
+  }
+  shotCanvas.width  = w;
+  shotCanvas.height = h;
+  shotCtx.lineCap = 'round'; shotCtx.lineJoin = 'round';
+  shotCtx.clearRect(0, 0, w, h);
+  shotCtx.drawImage(img, 0, 0, w, h);
+}
+
+function drawConfirm(dataUrl) {
+  shotState.capturedDataUrl = dataUrl;
+  if (shotPreview) shotPreview.src = dataUrl;
+  showShotStage('confirm');
+  openShotModal();
+}
+
+function startDrawingStage() {
+  if (!shotState.capturedDataUrl) return;
+  const img = new Image();
+  img.onload = () => {
+    resetShotCanvasToImage(img);
+    shotResetUndo();
+    showShotStage('draw');
+  };
+  img.src = shotState.capturedDataUrl;
+}
+
+// ----- Drawing on shot-canvas -----
+let shotDrawing = false;
+let shotLastX = 0, shotLastY = 0;
+const shotUndoStack = [];
+const SHOT_UNDO_MAX = 30;
+
+function shotPushUndo() {
+  if (!shotCtx || !shotCanvas) return;
+  try {
+    const snap = shotCtx.getImageData(0, 0, shotCanvas.width, shotCanvas.height);
+    shotUndoStack.push(snap);
+    if (shotUndoStack.length > SHOT_UNDO_MAX) shotUndoStack.shift();
+  } catch {}
+}
+function shotResetUndo() { shotUndoStack.length = 0; }
+function shotUndo() {
+  if (!shotCtx || shotUndoStack.length === 0) return;
+  const snap = shotUndoStack.pop();
+  shotCtx.putImageData(snap, 0, 0);
+}
+
+function shotEventToCanvasCoords(e) {
+  const rect = shotCanvas.getBoundingClientRect();
+  const sx = shotCanvas.width / rect.width;
+  const sy = shotCanvas.height / rect.height;
+  return { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy };
+}
+if (shotCanvas) {
+  shotCanvas.addEventListener('mousedown', (e) => {
+    shotPushUndo();
+    shotDrawing = true;
+    const { x, y } = shotEventToCanvasCoords(e);
+    shotLastX = x; shotLastY = y;
+  });
+  shotCanvas.addEventListener('mousemove', (e) => {
+    if (!shotDrawing) return;
+    const { x, y } = shotEventToCanvasCoords(e);
+    shotCtx.lineWidth = Number(shotSizeRange.value || 10);
+    if (shotState.tool === 'eraser') {
+      shotCtx.globalCompositeOperation = 'destination-out';
+      shotCtx.strokeStyle = 'rgba(0,0,0,1)';
+    } else {
+      shotCtx.globalCompositeOperation = 'source-over';
+      shotCtx.strokeStyle = shotColor.value;
+    }
+    shotCtx.beginPath();
+    shotCtx.moveTo(shotLastX, shotLastY);
+    shotCtx.lineTo(x, y);
+    shotCtx.stroke();
+    shotLastX = x; shotLastY = y;
+  });
+  const stopDrawing = () => { shotDrawing = false; };
+  shotCanvas.addEventListener('mouseup',    stopDrawing);
+  shotCanvas.addEventListener('mouseleave', stopDrawing);
+}
+
+// Cmd/Ctrl+Z undo while modal is open and draw stage visible
+window.addEventListener('keydown', (e) => {
+  if (!shotModal || shotModal.classList.contains('hidden')) return;
+  const drawStage = shotModal.querySelector('[data-stage="draw"]');
+  if (!drawStage || drawStage.hidden) return;
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+    e.preventDefault();
+    shotUndo();
+  }
+});
+
+if (shotModal) {
+  // Tool buttons
+  shotModal.querySelectorAll('[data-shot-tool]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tool = btn.dataset.shotTool;
+      if (tool === 'clear') {
+        if (shotState.capturedDataUrl) startDrawingStage();
+        return;
+      }
+      shotState.tool = tool;
+      shotModal.querySelectorAll('[data-shot-tool="pen"], [data-shot-tool="eraser"]').forEach((b) => {
+        b.classList.toggle('active', b.dataset.shotTool === tool);
+      });
+    });
+  });
+
+  // Action buttons
+  shotModal.addEventListener('click', async (e) => {
+    const target = e.target.closest('[data-shot-action]');
+    if (!target) return;
+    const action = target.dataset.shotAction;
+    if (action === 'cancel')        return closeShotModal();
+    if (action === 'confirm')       return startDrawingStage();
+    if (action === 'back-to-draw')  return showShotStage('draw');
+    if (action === 'generate-2d')   return runShot2D();
+    if (action === 'generate-3d')   return runShot3D();
+  });
+
+}
+
+function setShotBeam(active, stage) {
+  const wrap = stage === 'result'
+    ? shotModal.querySelector('[data-stage="result"] .shot-canvas-wrap')
+    : document.getElementById('shot-canvas-wrap');
+  if (!wrap) return;
+  const beam = wrap.querySelector('.shot-beam');
+  if (!beam) return;
+  beam.classList.toggle('active', !!active);
+}
+
+function clampAspectCanvas(srcCanvas, maxAspect = 2.5) {
+  const a = srcCanvas.width / srcCanvas.height;
+  if (a <= maxAspect && a >= 1 / maxAspect) return srcCanvas;
+  let sw, sh, sx, sy;
+  if (a > maxAspect) {
+    sh = srcCanvas.height;
+    sw = Math.floor(srcCanvas.height * maxAspect);
+    sx = Math.floor((srcCanvas.width - sw) / 2);
+    sy = 0;
+  } else {
+    sw = srcCanvas.width;
+    sh = Math.floor(srcCanvas.width * maxAspect);
+    sx = 0;
+    sy = Math.floor((srcCanvas.height - sh) / 2);
+  }
+  const out = document.createElement('canvas');
+  out.width = sw;
+  out.height = sh;
+  out.getContext('2d').drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
+  return out;
+}
+
+async function runShot2D() {
+  if (!shotCanvas) return;
+  const generateBtn = shotModal.querySelector('[data-shot-action="generate-2d"]');
+  const cancelBtn   = shotModal.querySelector('[data-stage="draw"] [data-shot-action="cancel"]');
+  if (generateBtn) generateBtn.disabled = true;
+  if (cancelBtn)   cancelBtn.disabled   = true;
+  setShotBeam(true, 'draw');
+  if (shotStatusEl) shotStatusEl.textContent = 'Uploading sketch…';
+
+  try {
+    // Bedrock Stability control-sketch rejects aspect ratios outside [1/2.5, 2.5].
+    // Center-crop the canvas to fit before exporting.
+    const exportCanvas = clampAspectCanvas(shotCanvas, 2.5);
+    const file = await exportCanvasToFile(exportCanvas, 'shot-sketch.png');
+    const uploaded = await uploadImage(file, `${BACKEND_URL}/api/upload-image`);
+
+    if (shotStatusEl) shotStatusEl.textContent = 'Generating 2D image…';
+    const prompt = (shotPromptInput && shotPromptInput.value.trim())
+      || 'Convert this sketched screenshot into a clean 2D illustration, preserving the original composition.';
+    const enhanced = await generate2D(
+      { imageUrl: uploaded.imageUrl, prompt },
+      `${BACKEND_URL}/api/generate-2d`,
+    );
+
+    shotState.resultImageUrl = enhanced.imageUrl;
+    shotState.resultImageUrlForBackend = enhanced.imageUrl;
+    if (shotResultImg) shotResultImg.src = enhanced.imageUrl;
+
+    showShotStage('result');
+  } catch (err) {
+    console.error('[Shot 2D] error:', err);
+    if (shotStatusEl) shotStatusEl.textContent = `Error: ${err.message || String(err)}`;
+  } finally {
+    setShotBeam(false, 'draw');
+    if (generateBtn) generateBtn.disabled = false;
+    if (cancelBtn)   cancelBtn.disabled   = false;
+  }
+}
+
+async function runShot3D() {
+  if (!shotState.resultImageUrlForBackend) return;
+  const gen3dBtn = shotModal.querySelector('[data-shot-action="generate-3d"]');
+  const backBtn  = shotModal.querySelector('[data-shot-action="back-to-draw"]');
+  const providerSelect = document.getElementById('shot-3d-provider');
+  const providerKind = (providerSelect && providerSelect.value) || 'stable-fast';
+  if (gen3dBtn) gen3dBtn.disabled = true;
+  if (backBtn)  backBtn.disabled  = true;
+  if (providerSelect) providerSelect.disabled = true;
+  setShotBeam(true, 'result');
+  if (shotStatusResEl) {
+    shotStatusResEl.textContent = providerKind === 'stable-fast'
+      ? 'Generating 3D (Stable Fast)…'
+      : 'Generating 3D (Meshy) — this may take a minute…';
+  }
+
+  try {
+    let modelUrl = null;
+    if (providerKind === 'stable-fast') {
+      // Stable Fast 3D requires at least 640×640. Upscale first.
+      const preppedUrl = await ensureImageMinSize(shotState.resultImageUrlForBackend, 640, 0);
+      const res = await fetch(`${BACKEND_URL}/api/3d/stable-fast`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl: preppedUrl }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`stable-fast failed: ${res.status} ${text}`);
+      }
+      const data = await res.json();
+      modelUrl = data.modelUrl;
+    } else {
+      const provider = new BackendThreeDProvider({ baseUrl: BACKEND_URL });
+      const start = await provider.startGeneration({
+        imageUrl: shotState.resultImageUrlForBackend,
+        mode: 'object',
+      });
+      const result = await pollThreeDGeneration({
+        provider,
+        jobId: start.jobId,
+        onUpdate: (job) => {
+          if (shotStatusResEl) {
+            const pct = typeof job.progress === 'number' ? ` (${Math.round(job.progress * 100)}%)` : '';
+            shotStatusResEl.textContent = `Meshy ${job.status}${pct}…`;
+          }
+        },
+      });
+      if (result.status !== 'completed' || !result.modelUrl) {
+        throw new Error(result.error || `3D job ${result.status}`);
+      }
+      modelUrl = result.modelUrl;
+    }
+
+    if (modelUrl && shot3dViewer) {
+      shot3dViewer.src = modelUrl;
+      if (shot3dViewerWrap) shot3dViewerWrap.hidden = false;
+    }
+    if (shotStatusResEl) shotStatusResEl.textContent = '3D model ready.';
+  } catch (err) {
+    console.error('[Shot 3D] error:', err);
+    if (shotStatusResEl) shotStatusResEl.textContent = `Error: ${err.message || String(err)}`;
+  } finally {
+    setShotBeam(false, 'result');
+    if (gen3dBtn) gen3dBtn.disabled = false;
+    if (backBtn)  backBtn.disabled  = false;
+    if (providerSelect) providerSelect.disabled = false;
+  }
+}
+
+if (window.electronAPI && window.electronAPI.onScreenshotCaptured) {
+  window.electronAPI.onScreenshotCaptured((dataUrl) => {
+    if (!dataUrl) return;
+    drawConfirm(dataUrl);
+  });
+}
+
+if (window.electronAPI && window.electronAPI.onScreenshotError) {
+  window.electronAPI.onScreenshotError((msg) => {
+    alert(msg);
+  });
+}
+
+if (window.electronAPI && window.electronAPI.onToggleTopButtons) {
+  window.electronAPI.onToggleTopButtons(() => {
+    document.body.classList.toggle('top-buttons-hidden');
+  });
+}
 
 fileInput.addEventListener('change', (e) => {
   const file = e.target.files[0];

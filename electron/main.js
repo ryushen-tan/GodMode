@@ -1,14 +1,17 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
-const { app, BrowserWindow, screen, ipcMain, desktopCapturer, shell } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, desktopCapturer, shell, globalShortcut, systemPreferences } = require('electron');
 const { execSync, exec, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const crypto = require('crypto');
 const { runAgent } = require('./services/backboard');
 
 
 let mainWindow;
 let godotProcess = null;
+let extraGodotProcesses = [];
 let trackingInterval = null;
 let fileWatcher = null;
 let restartTimeout = null;
@@ -16,6 +19,7 @@ let relaunchTimeout = null;
 let restartInProgress = false;
 
 const GAME_PROJECT_PATH = path.join(__dirname, '..', 'example_game', 'godot-FirstPersonStarter-main');
+const GAME_RUNNER_SCRIPT = 'res://godmode_run.gd';
 
 // Common Godot 4 install locations on macOS
 const GODOT_SEARCH_PATHS = [
@@ -24,10 +28,39 @@ const GODOT_SEARCH_PATHS = [
   '/Applications/Godot_mono.app/Contents/MacOS/Godot',
 ];
 
+function findRunningGodotBinary() {
+  try {
+    const result = execSync('ps aux').toString().trim();
+    if (!result) return null;
+
+    const lines = result
+      .split('\n')
+      .filter((line) => line.includes('Godot.app/Contents/MacOS/Godot'));
+    const preferred = lines.find((line) => line.includes(`--path ${GAME_PROJECT_PATH}`)
+      && !line.includes('--headless')
+      && !line.includes('--import')
+      && !line.includes('--check-only')) || lines[0];
+    if (!preferred) return null;
+
+    const pathMatch = preferred.match(/(\/\S+Godot\.app\/Contents\/MacOS\/Godot)/);
+    const binaryPath = pathMatch ? pathMatch[1] : null;
+    return binaryPath && fs.existsSync(binaryPath) ? binaryPath : null;
+  } catch {
+    return null;
+  }
+}
+
 function findGodotBinary() {
+  const configuredPath = process.env.GODOT_BIN || process.env.GODOT_PATH;
+  if (configuredPath && fs.existsSync(configuredPath)) return configuredPath;
+
   for (const p of GODOT_SEARCH_PATHS) {
     if (fs.existsSync(p)) return p;
   }
+
+  const runningBinary = findRunningGodotBinary();
+  if (runningBinary) return runningBinary;
+
   // Fall back to PATH
   try {
     const result = execSync('which godot 2>/dev/null || which godot4 2>/dev/null').toString().trim();
@@ -227,26 +260,87 @@ function restartGodot(delayMs = 500) {
   }
 }
 
-function launchGodot() {
+function spawnGodotInstance(label = 'primary', extraArgs = []) {
   const bin = findGodotBinary();
   if (!bin) {
     console.log('[GodMode] Godot binary not found. Start Godot manually and the overlay will attach.');
-    mainWindow.webContents.send('godot-status', 'no-binary');
-    return;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('godot-status', 'no-binary');
+    return null;
   }
 
-  console.log(`[GodMode] Launching Godot: ${bin}`);
-  godotProcess = spawn(bin, ['--path', GAME_PROJECT_PATH], { detached: false });
+  const args = ['--path', GAME_PROJECT_PATH, '--script', GAME_RUNNER_SCRIPT, ...extraArgs];
+  console.log(`[GodMode] Launching Godot ${label}: ${bin} ${args.join(' ')}`);
+  const child = spawn(bin, args, { detached: false });
 
-  godotProcess.on('error', (err) => {
-    console.error('[GodMode] Failed to launch Godot:', err.message);
-    mainWindow.webContents.send('godot-status', 'error');
+  child.on('error', (err) => {
+    console.error(`[GodMode] Failed to launch Godot ${label}:`, err.message);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('godot-status', 'error');
   });
 
-  godotProcess.on('exit', () => {
-    console.log('[GodMode] Godot process exited.');
-    mainWindow.webContents.send('godot-status', 'exited');
+  child.on('exit', () => {
+    console.log(`[GodMode] Godot ${label} process exited.`);
+    if (label === 'primary') {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('godot-status', 'exited');
+    } else {
+      extraGodotProcesses = extraGodotProcesses.filter((process) => process !== child);
+    }
   });
+
+  return child;
+}
+
+function launchGodot() {
+  const child = spawnGodotInstance('primary');
+  if (child) godotProcess = child;
+}
+
+function isPortListening(port) {
+  try {
+    execSync(`lsof -nP -iUDP:${port}`, { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function launchMultiplayerDemoInstance() {
+  const runningHost = Boolean(godotProcess || findRunningGodotInfo());
+  if (!runningHost) {
+    launchGodot();
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+  } else {
+    restartGodot(0);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+
+  if (!isPortListening(4242)) {
+    restartGodot(0);
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+  }
+
+  const display = screen.getPrimaryDisplay().workAreaSize;
+  const width = Math.min(960, Math.floor(display.width * 0.45));
+  const height = Math.min(540, Math.floor(display.height * 0.45));
+  const x = Math.max(40, display.width - width - 40);
+  const y = 80;
+  const secondary = spawnGodotInstance('multiplayer-demo', [
+    '--windowed',
+    '--resolution',
+    `${width}x${height}`,
+    '--position',
+    `${x},${y}`,
+    '--',
+    '--godmode-client'
+  ]);
+  if (!secondary) {
+    return { success: false, message: 'Godot binary not found; cannot open a second instance.' };
+  }
+  extraGodotProcesses.push(secondary);
+  return {
+    success: true,
+    pid: secondary.pid,
+    message: `Opened a second Godot client instance and told it to connect to 127.0.0.1:4242 (PID ${secondary.pid}).`
+  };
 }
 
 function startFileWatcher() {
@@ -314,6 +408,120 @@ async function captureGodotWindowScreenshot() {
   } catch (err) {
     console.error('[Screenshot] Error:', err);
     return null;
+  }
+}
+
+let pickerWindow = null;
+let pickerInFlight = false;
+
+async function startRegionScreenshot() {
+  if (pickerInFlight || pickerWindow) return;
+  pickerInFlight = true;
+
+  try {
+    if (process.platform === 'darwin') {
+      const status = systemPreferences.getMediaAccessStatus('screen');
+      if (status !== 'granted') {
+        console.warn('[Screenshot] Screen Recording permission status:', status);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('screenshot-error',
+            'Grant Screen Recording permission to GodMode in System Settings → Privacy & Security → Screen Recording, then quit and relaunch the app.');
+        }
+        try {
+          shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+        } catch {}
+        return;
+      }
+    }
+
+    const wasVisible = mainWindow && mainWindow.isVisible();
+    if (wasVisible) mainWindow.hide();
+    await new Promise((r) => setTimeout(r, 180));
+
+    const display = screen.getPrimaryDisplay();
+    const sf = display.scaleFactor || 1;
+    const physW = Math.max(1, Math.round(display.size.width * sf));
+    const physH = Math.max(1, Math.round(display.size.height * sf));
+
+    let sources;
+    try {
+      sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: physW, height: physH },
+      });
+    } catch (err) {
+      console.error('[Screenshot] desktopCapturer failed:', err);
+      if (wasVisible) mainWindow.showInactive();
+      return;
+    }
+
+    const source = sources && sources[0];
+    if (!source || source.thumbnail.isEmpty()) {
+      console.error('[Screenshot] No screen source returned');
+      if (wasVisible) mainWindow.showInactive();
+      return;
+    }
+
+    const tmpPath = path.join(os.tmpdir(),
+      `godmode-shot-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.png`);
+    fs.writeFileSync(tmpPath, source.thumbnail.toPNG());
+
+    pickerWindow = new BrowserWindow({
+      x: display.bounds.x,
+      y: display.bounds.y,
+      width: display.bounds.width,
+      height: display.bounds.height,
+      show: false,
+      frame: false,
+      transparent: false,
+      backgroundColor: '#000000',
+      hasShadow: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'region-picker-preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    pickerWindow.setAlwaysOnTop(true, 'screen-saver');
+    pickerWindow.once('ready-to-show', () => {
+      if (pickerWindow && !pickerWindow.isDestroyed()) {
+        pickerWindow.showInactive();
+        pickerWindow.focus();
+      }
+    });
+
+    let settled = false;
+    const cleanup = (dataUrl) => {
+      if (settled) return;
+      settled = true;
+      ipcMain.removeListener('region-picker:confirm', onConfirm);
+      ipcMain.removeListener('region-picker:cancel', onCancel);
+      try { fs.unlinkSync(tmpPath); } catch {}
+      if (pickerWindow && !pickerWindow.isDestroyed()) pickerWindow.close();
+      pickerWindow = null;
+      if (wasVisible && mainWindow && !mainWindow.isDestroyed()) mainWindow.showInactive();
+      if (dataUrl && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('screenshot-captured', dataUrl);
+      }
+    };
+    const onConfirm = (_e, dataUrl) => cleanup(dataUrl);
+    const onCancel  = () => cleanup(null);
+    ipcMain.on('region-picker:confirm', onConfirm);
+    ipcMain.on('region-picker:cancel', onCancel);
+    pickerWindow.on('closed', () => { if (!settled) cleanup(null); });
+
+    await pickerWindow.loadFile('renderer/region-picker.html', {
+      query: { src: `file://${tmpPath}` },
+    });
+  } finally {
+    pickerInFlight = false;
   }
 }
 
@@ -408,7 +616,7 @@ function createWindow() {
         if (!mainWindow.isDestroyed()) {
           mainWindow.webContents.send('agent-step', step);
         }
-      }, captureGodotWindowScreenshot);
+      }, captureGodotWindowScreenshot, launchMultiplayerDemoInstance);
 
       return { ...result, steps };
     } catch (error) {
@@ -419,6 +627,7 @@ function createWindow() {
 
   // Capture Godot game window screenshot
   ipcMain.handle('capture-game-window', captureGodotWindowScreenshot);
+  ipcMain.handle('launch-multiplayer-demo', () => launchMultiplayerDemoInstance());
 
   // Open URL in external browser
   ipcMain.on('open-external', (_event, url) => {
@@ -468,13 +677,36 @@ app.whenReady().then(() => {
     }
   }
   createWindow();
+  try {
+    const ok = globalShortcut.register('Control+Shift+A', () => startRegionScreenshot());
+    if (!ok) console.warn('[GodMode] failed to register Ctrl+Shift+A');
+    else console.log('[GodMode] Ctrl+Shift+A registered for screen-region capture');
+  } catch (err) {
+    console.warn('[GodMode] globalShortcut register error:', err.message);
+  }
+  try {
+    const ok = globalShortcut.register('Control+Shift+R', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('toggle-top-buttons');
+      }
+    });
+    if (!ok) console.warn('[GodMode] failed to register Ctrl+Shift+R');
+    else console.log('[GodMode] Ctrl+Shift+R registered for top-button toggle');
+  } catch (err) {
+    console.warn('[GodMode] globalShortcut register error:', err.message);
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+});
+
 app.on('window-all-closed', () => {
   if (trackingInterval) clearInterval(trackingInterval);
+  for (const process of extraGodotProcesses) process.kill();
   if (fileWatcher) fileWatcher.close();
   if (godotProcess) godotProcess.kill();
   if (process.platform !== 'darwin') app.quit();
