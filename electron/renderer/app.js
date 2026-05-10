@@ -14,6 +14,7 @@ const statusDot       = document.getElementById('status-dot');
 const promptInput     = document.getElementById('prompt-input');
 const submitBtn       = document.getElementById('submit-prompt-btn');
 const submitLabel     = document.getElementById('submit-label');
+const multiplayerDemoBtn = document.getElementById('multiplayer-demo-btn');
 const agentLog        = document.getElementById('agent-log');
 const agentSteps      = document.getElementById('agent-steps');
 const agentResult     = document.getElementById('agent-result');
@@ -279,6 +280,27 @@ submitBtn.addEventListener('click', async () => {
     submitLabel.textContent = 'Run Agent';
   }
 });
+
+if (multiplayerDemoBtn) {
+  multiplayerDemoBtn.addEventListener('click', async () => {
+    multiplayerDemoBtn.disabled = true;
+    const originalText = multiplayerDemoBtn.textContent;
+    multiplayerDemoBtn.textContent = 'Opening…';
+    try {
+      const result = await window.electronAPI.launchMultiplayerDemo();
+      agentResult.style.display = 'block';
+      agentResult.className = result.success === false ? 'agent-result error' : 'agent-result';
+      agentResult.textContent = result.message || 'Opened a second Godot game window.';
+    } catch (err) {
+      agentResult.style.display = 'block';
+      agentResult.className = 'agent-result error';
+      agentResult.textContent = `Error: ${err.message}`;
+    } finally {
+      multiplayerDemoBtn.disabled = false;
+      multiplayerDemoBtn.textContent = originalText;
+    }
+  });
+}
 
 penTool.addEventListener('click', () => {
   currentTool = 'pen';
